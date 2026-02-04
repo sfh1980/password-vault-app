@@ -1,0 +1,184 @@
+"""
+FastAPI app: unlock, lock, CRUD folders/entries, password generation. Thin
+handlers that call vault_db, audit, and session; no business logic in routes.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import FileResponse, Response
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+
+from vault import audit, config, vault_db
+from vault.api import session as session_store
+from vault.crypto import derive_key
+from vault.generator import generate_password
+
+app = FastAPI(title="Password Vault API", version="0.1.0")
+
+# Apply config at import so session timeout is set before first request
+session_store.set_timeout_minutes(config.VAULT_SESSION_TIMEOUT_MINUTES)
+
+# --- Request/response models (no secrets in docs) ---
+
+
+class UnlockRequest(BaseModel):
+    password: str = Field(..., min_length=1)
+
+
+class UnlockResponse(BaseModel):
+    session_id: str
+
+
+class CreateEntryRequest(BaseModel):
+    folder_id: int
+    title: str = Field(..., min_length=1)
+    username: str = ""
+    password: str = ""
+    notes: str = ""
+    url: str = ""
+
+
+class CreateEntryResponse(BaseModel):
+    id: int
+
+
+class GeneratePasswordQuery(BaseModel):
+    length: int = Field(20, ge=8, le=128)
+    upper: bool = True
+    lower: bool = True
+    digits: bool = True
+    symbols: bool = True
+
+
+class GeneratePasswordResponse(BaseModel):
+    password: str
+
+
+# --- Helpers ---
+
+
+def _require_session(x_vault_session: str | None = Header(None, alias="X-Vault-Session")) -> tuple[bytes, int]:
+    """Return (key, user_id) or raise 401."""
+    if not x_vault_session:
+        raise HTTPException(status_code=401, detail="Missing X-Vault-Session header")
+    out = session_store.get_session(x_vault_session)
+    if not out:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+    return out
+
+
+# --- Routes ---
+
+
+@app.post("/unlock", response_model=UnlockResponse)
+def post_unlock(body: UnlockRequest):
+    """Unlock the vault with master password; returns session id. Audit: unlock."""
+    password_bytes = body.password.encode("utf-8")
+    conn = vault_db.open_db(config.VAULT_DB_PATH)
+    try:
+        salt = vault_db.get_salt(conn)
+        if salt is None:
+            raise HTTPException(status_code=400, detail="Vault not initialized; run Phase 2 demo or init first.")
+        key = derive_key(password_bytes, salt)
+        user_id = vault_db.get_or_create_first_user(conn)
+        session_id = session_store.create_session(key, user_id)
+        audit.log_event("unlock", resource_id=None, user_id=user_id)
+        return UnlockResponse(session_id=session_id)
+    finally:
+        conn.close()
+
+
+@app.post("/lock")
+def post_lock(x_vault_session: str | None = Header(None, alias="X-Vault-Session")):
+    """Discard the session (lock). Audit: lock."""
+    if x_vault_session:
+        session_store.delete_session(x_vault_session)
+    audit.log_event("lock", resource_id=None)
+    return Response(status_code=204)  # No Content: no body
+
+
+@app.get("/folders")
+def get_folders(x_vault_session: str | None = Header(None, alias="X-Vault-Session")):
+    """List folders for the current user."""
+    key, user_id = _require_session(x_vault_session)
+    conn = vault_db.open_db(config.VAULT_DB_PATH)
+    try:
+        folders = vault_db.get_folders(conn, key, user_id)
+        audit.log_event("list_folders", resource_id=None, user_id=user_id)
+        return folders
+    finally:
+        conn.close()
+
+
+@app.get("/entries")
+def get_entries(
+    folder_id: int,
+    x_vault_session: str | None = Header(None, alias="X-Vault-Session"),
+):
+    """List entries in a folder."""
+    key, user_id = _require_session(x_vault_session)
+    conn = vault_db.open_db(config.VAULT_DB_PATH)
+    try:
+        entries = vault_db.get_entries(conn, key, folder_id)
+        audit.log_event("list_entries", resource_id=folder_id, user_id=user_id)
+        return entries
+    finally:
+        conn.close()
+
+
+@app.post("/entries", response_model=CreateEntryResponse)
+def post_entry(
+    body: CreateEntryRequest,
+    x_vault_session: str | None = Header(None, alias="X-Vault-Session"),
+):
+    """Create an entry in a folder. Audit: create_entry."""
+    key, user_id = _require_session(x_vault_session)
+    conn = vault_db.open_db(config.VAULT_DB_PATH)
+    try:
+        entry_id = vault_db.create_entry(
+            conn,
+            key,
+            body.folder_id,
+            title=body.title,
+            username=body.username,
+            password=body.password,
+            notes=body.notes,
+            url=body.url,
+        )
+        audit.log_event("create_entry", resource_id=entry_id, user_id=user_id)
+        return CreateEntryResponse(id=entry_id)
+    finally:
+        conn.close()
+
+
+@app.get("/generate-password", response_model=GeneratePasswordResponse)
+def get_generate_password(
+    length: int = 20,
+    upper: bool = True,
+    lower: bool = True,
+    digits: bool = True,
+    symbols: bool = True,
+    x_vault_session: str | None = Header(None, alias="X-Vault-Session"),
+):
+    """Generate a random password; requires an active session."""
+    _require_session(x_vault_session)
+    password = generate_password(length=length, upper=upper, lower=lower, digits=digits, symbols=symbols)
+    return GeneratePasswordResponse(password=password)
+
+
+# --- Phase 4: serve web UI (after API routes so they take precedence) ---
+
+_WEB_DIR = Path(__file__).resolve().parent.parent.parent.parent / "web"
+
+
+@app.get("/", response_class=FileResponse)
+def get_index():
+    """Serve the single-page vault UI."""
+    return FileResponse(_WEB_DIR / "index.html")
+
+
+app.mount("/static", StaticFiles(directory=str(_WEB_DIR)), name="static")

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vault</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 1rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.25rem; }
+    input, button, textarea { font-size: 1rem; padding: 0.35rem 0.5rem; margin: 0.25rem 0; }
+    button { cursor: pointer; }
+    .hidden { display: none; }
+    .error { color: #c00; margin: 0.5rem 0; }
+    .message { color: #060; margin: 0.5rem 0; }
+    #vault-activity { outline: 1px solid #ccc; padding: 1rem; margin-top: 1rem; }
+    ul { list-style: none; padding: 0; }
+    li { padding: 0.35rem 0; border-bottom: 1px solid #eee; }
+    li button { margin-left: 0.5rem; }
+    .entry-detail { margin-top: 1rem; padding: 1rem; background: #f8f8f8; }
+    .entry-detail p { margin: 0.35rem 0; }
+    #add-entry-form { margin-top: 1rem; }
+    #add-entry-form label { display: block; margin-top: 0.5rem; }
+    #add-entry-form input, #add-entry-form textarea { width: 100%; }
+  </style>
+</head>
+<body>
+  <div id="login-screen">
+    <h1>Vault</h1>
+    <p id="login-message" class="message hidden"></p>
+    <p id="login-error" class="error hidden"></p>
+    <form id="login-form">
+      <label for="password">Master password</label>
+      <input type="password" id="password" name="password" required autocomplete="current-password">
+      <button type="submit">Unlock</button>
+    </form>
+  </div>
+
+  <div id="vault-screen" class="hidden">
+    <h1>Vault</h1>
+    <p id="session-message" class="message hidden"></p>
+    <p id="vault-error" class="error hidden"></p>
+    <button type="button" id="lock-btn">Lock</button>
+
+    <div id="vault-activity">
+      <h2>Folders</h2>
+      <ul id="folder-list"></ul>
+      <h2 id="entries-heading">Entries</h2>
+      <ul id="entry-list"></ul>
+      <div id="entry-detail" class="entry-detail hidden"></div>
+      <div id="add-entry-form" class="hidden">
+        <h3>Add entry</h3>
+        <form id="new-entry-form">
+          <input type="hidden" id="new-entry-folder-id" name="folder_id">
+          <label for="new-title">Title</label>
+          <input type="text" id="new-title" name="title" required>
+          <label for="new-username">Username</label>
+          <input type="text" id="new-username" name="username">
+          <label for="new-password">Password</label>
+          <input type="password" id="new-password" name="password">
+          <button type="button" id="generate-password-btn">Generate</button>
+          <label for="new-url">URL</label>
+          <input type="url" id="new-url" name="url">
+          <label for="new-notes">Notes</label>
+          <textarea id="new-notes" name="notes" rows="2"></textarea>
+          <button type="submit">Save</button>
+        </form>
+      </div>
+      <button type="button" id="add-entry-btn">Add entry</button>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

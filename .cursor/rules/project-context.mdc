@@ -1,0 +1,35 @@
+---
+description: Key facts and context about this project and environment—review before answering or commenting
+alwaysApply: true
+---
+
+# Project context — remember first
+
+Before answering any question or responding to any comment, recall these facts:
+
+## Environment
+- **Homelab:** Runs on an **Ubuntu OS laptop** (not a separate server or desktop). Laptop is always on barring power issues.
+- **On laptop:** Docker and Docker Compose installed on the host. **Nginx** runs as a **Docker container** (reverse proxy), not installed on the host.
+- **Backup/NAS:** Dell Optiplex 7050 SFF running **TrueNAS Scale** at **http://192.168.1.136/ui/signin** — used for vault backups (daily encrypted, rolling 30 days). Backup from vault app will target this host (e.g. SMB/NFS/rclone to be chosen).
+- **Domain:** whoissean.dev (Porkbun); vault will be at vault.whoissean.dev.
+- **Deploy target:** Docker on that Ubuntu laptop; Nginx for HTTPS. Use **ports 80/443** for now; OPNsense box planned later on the home network.
+- **Python:** Use the most current stable version (in Docker and when developing).
+- **Development:** This repo is developed either on the laptop or in a separate Docker container.
+- **Existing services (same Nginx):** nginx, cAdvisor, Dozzle, Portainer, dnsmasq, Jellyfin — add vault.whoissean.dev as another vhost without conflicting.
+- **Ports:** Vault API uses **host port 8001** (Portainer uses 8000). In Docker: publish `127.0.0.1:8001:8000`; Nginx proxy_pass to `127.0.0.1:8001`.
+
+## Project
+- Family password vault for ~2 people; shared/family use; tens to hundreds of entries, scalable.
+- Design and phases are in DESIGN_AND_EDUCATION.md; requirements answers in PASSWORD_VAULT_QUESTIONS.md.
+- Phases 1–4 done (crypto, DB, API + audit, web UI); next is Phase 5 (Docker, backup, recovery key).
+
+## Development approach — production + educational
+- **Dual purpose:** Both the password vault and the homelab are **production** (everything built will be used) and **educational**. Development is learning-focused; every step includes a minor lesson or teachable moment.
+- **Practices to reinforce:** DRY; separation of concerns; agile/scrum; CI/CD and version control; testing before, during, and after coding; readable code; code review standards; documentation as code develops.
+- **Also include where relevant:** security by design / shift-left security; clear API design (e.g. REST, OpenAPI); dependency pinning and minimal deps; error handling and observability (logging, no secrets in logs); incremental delivery / MVP then iterate; refactoring as you go; single responsibility and clean boundaries; 12-factor–style config and deploy (env, stateless, logs to stdout). When suggesting or writing code, briefly call out *why* (the teachable moment) so it reinforces these practices.
+- **Refactoring:** Do **not** auto-refactor. Walk the user through what needs to be corrected and **why**; let them apply changes (or approve step-by-step) so the lesson sticks.
+
+Use this context to tailor answers (e.g. deployment steps assume Ubuntu laptop, not a separate homelab server).
+
+---
+Add more context above as needed.

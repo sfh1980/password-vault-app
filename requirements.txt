@@ -1,0 +1,6 @@
+# Phase 1: key derivation and encryption.
+# Phase 3: FastAPI + ASGI server; pydantic comes with FastAPI.
+# Pinned for reproducible installs (see project rules: dependency pinning).
+cryptography>=42.0.0,<47
+fastapi>=0.115,<1
+uvicorn[standard]>=0.32,<1
