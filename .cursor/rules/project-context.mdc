@@ -11,7 +11,6 @@ Before answering any question or responding to any comment, recall these facts:
 - **Homelab:** Runs on an **Ubuntu OS laptop** (not a separate server or desktop). Laptop is always on barring power issues.
 - **On laptop:** Docker and Docker Compose installed on the host. **Nginx** runs as a **Docker container** (reverse proxy), not installed on the host.
 - **Backup/NAS:** Dell Optiplex 7050 SFF running **TrueNAS Scale** at **http://192.168.1.136/ui/signin** — used for vault backups (daily encrypted, rolling 30 days). Backup from vault app will target this host (e.g. SMB/NFS/rclone to be chosen).
-- **Domain:** whoissean.dev (Porkbun); not used for the vault for now (vault is not published).
 - **Deploy target:** Docker on that Ubuntu laptop only. Vault is **not** exposed to the internet; access is local (127.0.0.1:8050) or, when VPN (e.g. WireGuard) is set up, via VPN only. OPNsense box planned later on the home network.
 - **Python:** Use the most current stable version (in Docker and when developing).
 - **Development:** This repo is developed either on the laptop or in a separate Docker container.

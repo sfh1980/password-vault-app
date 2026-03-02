@@ -1,6 +1,6 @@
 # Design and planning
 
-Combined design, requirements, agents/rules, and domain integration. For the full doc index see [DOCS.md](DOCS.md).
+Combined design, requirements, and agents/rules. For the full doc index see [DOCS.md](DOCS.md).
 
 ---
 
@@ -9,7 +9,6 @@ Combined design, requirements, agents/rules, and domain integration. For the ful
 1. [Design summary and education](#1-design-summary-and-education)
 2. [Password vault Q&A](#2-password-vault-qa)
 3. [Agents and rules design](#3-agents-and-rules-design)
-4. [Domain integration (whoissean.dev)](#4-domain-integration-whoisseandev)
 
 ---
 
@@ -167,25 +166,3 @@ Location: `docs/handoffs/` (e.g. `frontend-YYYYMMDD.md`). Structure: Scope, Deci
 | F16 | Standard: `tests/` directory, `pytest tests/` from repo root with venv. |
 
 ---
-
-## 4. Domain integration (whoissean.dev)
-
-*Source: consolidated from WHOISSEAN_INTEGRATION.md.*
-
-### Can the full app run on whoissean.dev?
-
-**No.** whoissean.dev is a Jekyll static site on GitHub Pages; it does not run Python or a backend. The vault backend must run on your homelab (Docker).
-
-### Options for “piggybacking”
-
-- **Option A (recommended):** Run the full vault at **vault.whoissean.dev** (Docker on homelab). Add DNS for subdomain; add a link on whoissean.dev to `https://vault.whoissean.dev`.
-- **Option B:** Host static vault UI in the Jekyll repo at e.g. whoissean.dev/vault/; UI calls API at vault.whoissean.dev. Requires CORS and token-based auth.
-- **Option C:** Link only: vault runs anywhere; whoissean.dev has a link to it.
-
-### What you need for Option A
-
-- **DNS:** A or CNAME for `vault.whoissean.dev` to your homelab (or tunnel).
-- **Homelab:** Vault in Docker; Nginx + TLS or Cloudflare Tunnel.
-- **whoissean.dev:** Add nav link or page to `https://vault.whoissean.dev`.
-
-See [Deploy and operations](DEPLOY_AND_OPERATIONS.md#deploy-docker-nginx-and-vaultwhoisseandev) for Nginx, Certbot, and TLS steps.

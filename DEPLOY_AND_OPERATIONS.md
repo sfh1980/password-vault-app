@@ -7,7 +7,7 @@ Homelab deploy (Docker), HTTPS at proxy, health and graceful shutdown, backup/re
 ## Table of contents
 
 1. [Deploy process (homelab only)](#1-deploy-process-homelab-only)
-2. [Deploy Docker, Nginx, and vault.whoissean.dev](#2-deploy-docker-nginx-and-vaultwhoisseandev)
+2. [Deploy Docker, Nginx, and public HTTPS (optional)](#2-deploy-docker-nginx-and-public-https-optional)
 3. [Backup and restore](#3-backup-and-restore)
 4. [Dependency scanning](#4-dependency-scanning)
 
@@ -67,16 +67,16 @@ Use a **reverse proxy** (e.g. Nginx, Caddy) in front. Terminate **HTTPS** at the
 
 ---
 
-## 2. Deploy Docker, Nginx, and vault.whoissean.dev
+## 2. Deploy Docker, Nginx, and public HTTPS (optional)
 
-*For when you want to expose the vault on the internet at https://vault.whoissean.dev.*
+*For when you want to expose the vault on the internet at a hostname of your choice (e.g. vault.example.com).*
 
 ### Overview
 
 1. Run the vault in Docker (port 8000 → host 127.0.0.1:8050).
 2. Install Nginx + Certbot on the same machine.
-3. Configure Nginx to proxy `vault.whoissean.dev` → vault container.
-4. Point DNS for `vault.whoissean.dev` to your public IP.
+3. Configure Nginx to proxy your chosen hostname (e.g. `vault.example.com`) → vault container.
+4. Point DNS for that hostname to your public IP.
 5. Forward ports 80 and 443 from the router to Ubuntu.
 6. Get a free TLS certificate (Let’s Encrypt) with Certbot.
 
@@ -84,7 +84,7 @@ Use a **reverse proxy** (e.g. Nginx, Caddy) in front. Terminate **HTTPS** at the
 
 - Vault runs (e.g. `docker compose up`; UI at http://localhost:8050).
 - Ubuntu machine that will run Docker and Nginx; router can forward 80/443 to it.
-- Domain **whoissean.dev** and DNS access (e.g. Porkbun).
+- A domain and DNS access at your registrar.
 
 ### Step 1 — Vault in Docker
 
@@ -102,15 +102,15 @@ sudo apt update
 sudo apt install -y nginx certbot python3-certbot-nginx
 ```
 
-### Step 3 — Nginx config for vault.whoissean.dev
+### Step 3 — Nginx config for your hostname
 
-Create e.g. `/etc/nginx/sites-available/vault.whoissean.dev`:
+Create e.g. `/etc/nginx/sites-available/vault.example.com` (use your real hostname):
 
 ```nginx
 server {
     listen 80;
     listen [::]:80;
-    server_name vault.whoissean.dev;
+    server_name vault.example.com;
 
     location /.well-known/acme-challenge/ {
         root /var/www/html;
@@ -132,7 +132,7 @@ server {
 Enable and test:
 
 ```bash
-sudo ln -s /etc/nginx/sites-available/vault.whoissean.dev /etc/nginx/sites-enabled/
+sudo ln -s /etc/nginx/sites-available/vault.example.com /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl reload nginx
 ```
@@ -141,7 +141,7 @@ After Certbot (Step 6), it will add HTTPS and optionally redirect HTTP→HTTPS. 
 
 ### Step 4 — DNS
 
-Add an **A** record at your registrar: **vault** (or host `vault.whoissean.dev`) → your public IP. If your IP changes, use dynamic DNS and point the A record to that hostname.
+Add an **A** record at your registrar: your hostname (e.g. `vault.example.com`) → your public IP. If your IP changes, use dynamic DNS and point the A record to that hostname.
 
 ### Step 5 — Router
 
@@ -150,18 +150,18 @@ Forward TCP 80 and 443 to the Ubuntu machine’s LAN IP. Allow 80/443 in Ubuntu 
 ### Step 6 — TLS with Certbot
 
 ```bash
-sudo certbot --nginx -d vault.whoissean.dev
+sudo certbot --nginx -d vault.example.com
 ```
 
 Certbot obtains the certificate and configures Nginx for HTTPS. Ensure the HTTPS server block proxies to `http://127.0.0.1:8050`. Renewal is typically automatic (cron or systemd timer). Test: `sudo certbot renew --dry-run`.
 
 ### Step 7 — Verify
 
-Open https://vault.whoissean.dev from another network; you should see the vault login over HTTPS.
+Open https://vault.example.com (or your hostname) from another network; you should see the vault login over HTTPS.
 
 ### Optional: Nginx in Docker
 
-If Nginx runs in Docker: expose 80 and 443 from the Nginx container; mount certificates (e.g. `/etc/letsencrypt`); add a server block for `vault.whoissean.dev` with `ssl_certificate` and `proxy_pass http://vault:8000` (if the vault container is named `vault` on the same network).
+If Nginx runs in Docker: expose 80 and 443 from the Nginx container; mount certificates (e.g. `/etc/letsencrypt`); add a server block for your hostname with `ssl_certificate` and `proxy_pass http://vault:8000` (if the vault container is named `vault` on the same network).
 
 ---
 
