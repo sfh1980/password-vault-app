@@ -1,6 +1,6 @@
 # Password Vault
 
-Family password vault: self-hosted, encrypted, backup to TrueNAS. Served at **vault.whoissean.dev**.
+Family password vault: self-hosted, encrypted, backup to TrueNAS.
 
 **Documentation:** See **[DOCS.md](DOCS.md)** for the full table of contents. Main entries: [User guide](USER_GUIDE.md) (run and use the app); [Deploy and operations](DEPLOY_AND_OPERATIONS.md) (Docker, Nginx, backup); [Developer reference](DEVELOPER_REFERENCE.md) (API, status, tests, glossary); [Agents and workflow](AGENTS_AND_WORKFLOW.md); [Educational code walkthrough](EDUCATIONAL_CODE_WALKTHROUGH.md).
 
