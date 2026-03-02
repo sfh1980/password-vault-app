@@ -27,7 +27,16 @@
   const addEntryForm = document.getElementById('add-entry-form');
   const newEntryForm = document.getElementById('new-entry-form');
   const addEntryBtn = document.getElementById('add-entry-btn');
+  const addFolderBtn = document.getElementById('add-folder-btn');
+  const addFolderForm = document.getElementById('add-folder-form');
+  const newFolderNameInput = document.getElementById('new-folder-name');
+  const saveFolderBtn = document.getElementById('save-folder-btn');
+  const cancelFolderBtn = document.getElementById('cancel-folder-btn');
+  const newFolderForm = document.getElementById('new-folder-form');
   const vaultActivity = document.getElementById('vault-activity');
+
+  /** Folder id for the currently listed entries (so we can refresh after edit/delete). */
+  let currentFolderId = null;
 
   function getSessionId() {
     return sessionStorage.getItem('vault_session_id');
@@ -124,6 +133,11 @@
     });
   }
 
+  function hideCreateFolderForm() {
+    addFolderForm.classList.add('hidden');
+    newFolderNameInput.value = '';
+  }
+
   function loadFolders() {
     return api('/folders').then(function (r) { return r.json(); }).then(function (folders) {
       folderList.innerHTML = '';
@@ -146,6 +160,7 @@
   }
 
   function loadEntries(folderId) {
+    currentFolderId = folderId;
     addEntryBtn.dataset.folderId = String(folderId);
     return api('/entries?folder_id=' + encodeURIComponent(folderId)).then(function (r) { return r.json(); }).then(function (entries) {
       entryList.innerHTML = '';
@@ -179,12 +194,102 @@
       (entry.username ? '<p>Username: ' + escapeHtml(entry.username) + '</p>' : '') +
       (entry.url ? '<p>URL: <a href="' + escapeHtml(entry.url) + '" target="_blank" rel="noopener">' + escapeHtml(entry.url) + '</a></p>' : '') +
       (entry.notes ? '<p>Notes: ' + escapeHtml(entry.notes) + '</p>' : '') +
-      '<button type="button" id="copy-detail-password">Copy password</button>';
+      '<button type="button" id="copy-detail-password">Copy password</button> ' +
+      '<button type="button" id="edit-entry-btn">Edit</button> ' +
+      '<button type="button" id="delete-entry-btn">Delete</button>' +
+      '<div id="edit-entry-form" class="hidden" style="margin-top:1rem;"></div>';
     entryDetail.classList.remove('hidden');
+    entryDetail.dataset.entryId = String(entry.id);
     document.getElementById('copy-detail-password').addEventListener('click', function () {
       copyPassword(entry.password);
       resetInactivityTimer();
     });
+    document.getElementById('edit-entry-btn').addEventListener('click', function () {
+      showEditEntryForm(entry);
+      resetInactivityTimer();
+    });
+    document.getElementById('delete-entry-btn').addEventListener('click', function () {
+      if (confirm('Delete this entry? This cannot be undone.')) {
+        deleteEntry(entry.id);
+      }
+      resetInactivityTimer();
+    });
+  }
+
+  function showEditEntryForm(entry) {
+    const formEl = document.getElementById('edit-entry-form');
+    if (!formEl) return;
+    formEl.innerHTML =
+      '<form id="entry-edit-form">' +
+      '<label for="edit-title">Title</label><input type="text" id="edit-title" value="' + escapeHtml(entry.title) + '" required> ' +
+      '<label for="edit-username">Username</label><input type="text" id="edit-username" value="' + escapeHtml(entry.username) + '"> ' +
+      '<label for="edit-password">Password</label><input type="password" id="edit-password" value="' + escapeHtml(entry.password) + '"> <button type="button" id="edit-generate-password">Generate</button> ' +
+      '<label for="edit-url">URL</label><input type="url" id="edit-url" value="' + escapeHtml(entry.url || '') + '"> ' +
+      '<label for="edit-notes">Notes</label><textarea id="edit-notes" rows="2">' + escapeHtml(entry.notes || '') + '</textarea> ' +
+      '<button type="submit">Save</button> <button type="button" id="edit-cancel-btn">Cancel</button>' +
+      '</form>';
+    formEl.classList.remove('hidden');
+    document.getElementById('entry-edit-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      saveEntryEdit(entry.id);
+    });
+    document.getElementById('edit-cancel-btn').addEventListener('click', function () {
+      formEl.classList.add('hidden');
+      formEl.innerHTML = '';
+    });
+    document.getElementById('edit-generate-password').addEventListener('click', function () {
+      api('/generate-password?length=20').then(function (r) { return r.json(); }).then(function (data) {
+        document.getElementById('edit-password').value = data.password;
+      }).catch(function () {});
+    });
+  }
+
+  function saveEntryEdit(entryId) {
+    const payload = {
+      title: document.getElementById('edit-title').value.trim(),
+      username: document.getElementById('edit-username').value,
+      password: document.getElementById('edit-password').value,
+      url: document.getElementById('edit-url').value,
+      notes: document.getElementById('edit-notes').value,
+    };
+    if (!payload.title) {
+      showVaultError('Title is required.');
+      return;
+    }
+    api('/entries/' + entryId, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    })
+      .then(function (r) {
+        if (r.status !== 204) return r.json().then(function () { throw new Error('Update failed'); });
+      })
+      .then(function () {
+        document.getElementById('edit-entry-form').classList.add('hidden');
+        document.getElementById('edit-entry-form').innerHTML = '';
+        entryDetail.classList.add('hidden');
+        entryDetail.innerHTML = '';
+        if (currentFolderId != null) loadEntries(currentFolderId);
+        resetInactivityTimer();
+      })
+      .catch(function (err) {
+        if (err.message !== 'Unauthorized') showVaultError(err.message || 'Failed to update entry.');
+      });
+  }
+
+  function deleteEntry(entryId) {
+    api('/entries/' + entryId, { method: 'DELETE' })
+      .then(function (r) {
+        if (r.status !== 204) throw new Error('Delete failed');
+      })
+      .then(function () {
+        entryDetail.classList.add('hidden');
+        entryDetail.innerHTML = '';
+        if (currentFolderId != null) loadEntries(currentFolderId);
+        resetInactivityTimer();
+      })
+      .catch(function (err) {
+        if (err.message !== 'Unauthorized') showVaultError(err.message || 'Failed to delete entry.');
+      });
   }
 
   function escapeHtml(s) {
@@ -218,6 +323,43 @@
 
   lockBtn.addEventListener('click', function () {
     lock();
+  });
+
+  addFolderBtn.addEventListener('click', function () {
+    addFolderForm.classList.remove('hidden');
+    newFolderNameInput.focus();
+    resetInactivityTimer();
+  });
+
+  cancelFolderBtn.addEventListener('click', function () {
+    hideCreateFolderForm();
+    resetInactivityTimer();
+  });
+
+  function submitCreateFolder() {
+    const name = newFolderNameInput.value.trim();
+    if (!name) {
+      showVaultError('Enter a folder name.');
+      return;
+    }
+    api('/folders', {
+      method: 'POST',
+      body: JSON.stringify({ name: name }),
+    })
+      .then(function (r) { return r.json(); })
+      .then(function () {
+        hideCreateFolderForm();
+        loadFolders();
+        resetInactivityTimer();
+      })
+      .catch(function (err) {
+        if (err.message !== 'Unauthorized') showVaultError(err.message || 'Failed to create folder.');
+      });
+  }
+
+  newFolderForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    submitCreateFolder();
   });
 
   vaultActivity.addEventListener('click', resetInactivityTimer);

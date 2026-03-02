@@ -1,0 +1,14 @@
+---
+description: Database and migration standards — migrations in migrations/, BLOB for sensitive fields, parameterized queries
+globs: ["migrations/**", "**/vault_db.py"]
+---
+
+# Database standards
+
+- **Migrations:** All schema changes go in new files under `migrations/` (e.g. `002_add_recovery_key.sql`). Number or name them so order is clear. Update `schema_version` at the end of each migration. Use **up + down** when possible: provide a "down" (rollback) migration or script where feasible so changes can be reverted.
+- **Encryption:** Sensitive data (passwords, titles, usernames, notes, URLs, attachment blobs) are stored as **BLOB** and encrypted at the application layer in `vault_db.py`. Do not store plaintext secrets in the DB. Use `_encrypt_field` / `_decrypt_field` (or equivalent) with the vault key.
+- **Queries:** Use parameterized queries only (`?` or `:name` placeholders). Never concatenate user input or variables into SQL strings.
+- **Schema:** Keep IDs and foreign keys as INTEGER; use BLOB for encrypted fields; use appropriate types for non-sensitive metadata (e.g. created_at).
+- **vault_db.py:** Open DB with the project's config (e.g. `config.VAULT_DB_PATH`). Run migrations on open. Expose CRUD and helpers; keep crypto and key handling consistent with the rest of the app.
+
+When suggesting or writing migrations or vault_db code, the database-tester and security-auditor should be able to validate against these standards.

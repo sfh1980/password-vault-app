@@ -22,6 +22,8 @@
     #add-entry-form { margin-top: 1rem; }
     #add-entry-form label { display: block; margin-top: 0.5rem; }
     #add-entry-form input, #add-entry-form textarea { width: 100%; }
+    #add-folder-form { margin: 0.5rem 0; }
+    #add-folder-form input { margin-right: 0.5rem; }
   </style>
 </head>
 <body>
@@ -44,6 +46,15 @@
 
     <div id="vault-activity">
       <h2>Folders</h2>
+      <button type="button" id="add-folder-btn">Create folder</button>
+      <div id="add-folder-form" class="hidden">
+        <form id="new-folder-form">
+          <label for="new-folder-name">Folder name</label>
+          <input type="text" id="new-folder-name" name="name" required placeholder="e.g. Work, Shopping">
+          <button type="submit" id="save-folder-btn">Save</button>
+        </form>
+        <button type="button" id="cancel-folder-btn">Cancel</button>
+      </div>
       <ul id="folder-list"></ul>
       <h2 id="entries-heading">Entries</h2>
       <ul id="entry-list"></ul>

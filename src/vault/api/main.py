@@ -33,6 +33,14 @@ class UnlockResponse(BaseModel):
     session_id: str
 
 
+class CreateFolderRequest(BaseModel):
+    name: str = Field(..., min_length=1)
+
+
+class CreateFolderResponse(BaseModel):
+    id: int
+
+
 class CreateEntryRequest(BaseModel):
     folder_id: int
     title: str = Field(..., min_length=1)
@@ -44,6 +52,15 @@ class CreateEntryRequest(BaseModel):
 
 class CreateEntryResponse(BaseModel):
     id: int
+
+
+class UpdateEntryRequest(BaseModel):
+    """All fields optional; only provided fields are updated."""
+    title: str | None = None
+    username: str | None = None
+    password: str | None = None
+    notes: str | None = None
+    url: str | None = None
 
 
 class GeneratePasswordQuery(BaseModel):
@@ -114,6 +131,22 @@ def get_folders(x_vault_session: str | None = Header(None, alias="X-Vault-Sessio
         conn.close()
 
 
+@app.post("/folders", response_model=CreateFolderResponse)
+def post_folder(
+    body: CreateFolderRequest,
+    x_vault_session: str | None = Header(None, alias="X-Vault-Session"),
+):
+    """Create a folder. Audit: create_folder."""
+    key, user_id = _require_session(x_vault_session)
+    conn = vault_db.open_db(config.VAULT_DB_PATH)
+    try:
+        folder_id = vault_db.create_folder(conn, key, user_id, body.name.strip())
+        audit.log_event("create_folder", resource_id=folder_id, user_id=user_id)
+        return CreateFolderResponse(id=folder_id)
+    finally:
+        conn.close()
+
+
 @app.get("/entries")
 def get_entries(
     folder_id: int,
@@ -151,6 +184,53 @@ def post_entry(
         )
         audit.log_event("create_entry", resource_id=entry_id, user_id=user_id)
         return CreateEntryResponse(id=entry_id)
+    finally:
+        conn.close()
+
+
+@app.patch("/entries/{entry_id}")
+def patch_entry(
+    entry_id: int,
+    body: UpdateEntryRequest,
+    x_vault_session: str | None = Header(None, alias="X-Vault-Session"),
+):
+    """Update an entry by id. Audit: update_entry. Returns 204 on success, 404 if not found or not owned."""
+    key, user_id = _require_session(x_vault_session)
+    conn = vault_db.open_db(config.VAULT_DB_PATH)
+    try:
+        ok = vault_db.update_entry(
+            conn,
+            key,
+            entry_id,
+            user_id,
+            title=body.title,
+            username=body.username,
+            password=body.password,
+            notes=body.notes,
+            url=body.url,
+        )
+        if not ok:
+            raise HTTPException(status_code=404, detail="Entry not found")
+        audit.log_event("update_entry", resource_id=entry_id, user_id=user_id)
+        return Response(status_code=204)
+    finally:
+        conn.close()
+
+
+@app.delete("/entries/{entry_id}")
+def delete_entry_route(
+    entry_id: int,
+    x_vault_session: str | None = Header(None, alias="X-Vault-Session"),
+):
+    """Delete an entry by id. Audit: delete_entry. Returns 204 on success, 404 if not found or not owned."""
+    key, user_id = _require_session(x_vault_session)
+    conn = vault_db.open_db(config.VAULT_DB_PATH)
+    try:
+        ok = vault_db.delete_entry(conn, entry_id, user_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Entry not found")
+        audit.log_event("delete_entry", resource_id=entry_id, user_id=user_id)
+        return Response(status_code=204)
     finally:
         conn.close()
 

@@ -3,8 +3,12 @@
 Family password vault: self-hosted, encrypted, backup to TrueNAS. Served at **vault.whoissean.dev**.
 
 - **Design & requirements:** [DESIGN_AND_EDUCATION.md](DESIGN_AND_EDUCATION.md), [PASSWORD_VAULT_QUESTIONS.md](PASSWORD_VAULT_QUESTIONS.md)
+- **How to run and use the app (step-by-step):** [HOW_IT_WORKS.md](HOW_IT_WORKS.md) — updated whenever we add features.
+- **Educational code walkthrough:** [EDUCATIONAL_CODE_WALKTHROUGH.md](EDUCATIONAL_CODE_WALKTHROUGH.md) — line-by-line and block-by-block explanation of every file, in plain language; standards, practices, algorithms, and cross-references. Updated when we add or change code.
 - **Deploy (Docker, Nginx, TLS):** [DEPLOY_DOCKER_NGINX.md](DEPLOY_DOCKER_NGINX.md)
 - **Domain / whoissean.dev:** [WHOISSEAN_INTEGRATION.md](WHOISSEAN_INTEGRATION.md)
+- **Agents (how to hand work to them):** [docs/GETTING_STARTED_WITH_AGENTS.md](docs/GETTING_STARTED_WITH_AGENTS.md) — how to put app completion in the hands of the subagents; what to say, what to expect, suggested first task.
+- **Build status & next steps:** [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) — what’s done, what’s missing, and suggested order to continue.
 
 **Current phase:** Phase 4 (web UI) done → Phase 5 (Docker, backup, recovery key).
 

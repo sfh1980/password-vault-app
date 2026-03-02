@@ -206,3 +206,92 @@ def get_entries(conn: sqlite3.Connection, key: bytes, folder_id: int) -> list[di
         }
         for r in rows
     ]
+
+
+def _entry_owned_by_user(conn: sqlite3.Connection, entry_id: int, user_id: int) -> bool:
+    """True if entry exists and its folder belongs to user."""
+    row = conn.execute(
+        """SELECT 1 FROM entries e
+           INNER JOIN folders f ON e.folder_id = f.id
+           WHERE e.id = ? AND f.user_id = ?""",
+        (entry_id, user_id),
+    ).fetchone()
+    return row is not None
+
+
+def get_entry(
+    conn: sqlite3.Connection, key: bytes, entry_id: int, user_id: int
+) -> dict[str, Any] | None:
+    """Return one entry by id if it exists and its folder belongs to user; else None."""
+    row = conn.execute(
+        """SELECT e.id, e.folder_id, e.title_encrypted, e.username_encrypted,
+                  e.password_encrypted, e.notes_encrypted, e.url_encrypted, e.created_at
+           FROM entries e
+           INNER JOIN folders f ON e.folder_id = f.id
+           WHERE e.id = ? AND f.user_id = ?""",
+        (entry_id, user_id),
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "folder_id": row["folder_id"],
+        "title": _decrypt_field(key, row["title_encrypted"]),
+        "username": _decrypt_field(key, row["username_encrypted"]),
+        "password": _decrypt_field(key, row["password_encrypted"]),
+        "notes": _decrypt_field(key, row["notes_encrypted"]),
+        "url": _decrypt_field(key, row["url_encrypted"]),
+        "created_at": row["created_at"],
+    }
+
+
+def update_entry(
+    conn: sqlite3.Connection,
+    key: bytes,
+    entry_id: int,
+    user_id: int,
+    *,
+    title: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
+    notes: str | None = None,
+    url: str | None = None,
+) -> bool:
+    """Update entry by id; only provided fields are updated. Returns True if updated, False if not found/not owned."""
+    if not _entry_owned_by_user(conn, entry_id, user_id):
+        return False
+    existing = get_entry(conn, key, entry_id, user_id)
+    if not existing:
+        return False
+    new_title = title if title is not None else existing["title"]
+    new_username = username if username is not None else existing["username"]
+    new_password = password if password is not None else existing["password"]
+    new_notes = notes if notes is not None else existing["notes"]
+    new_url = url if url is not None else existing["url"]
+
+    title_blob = _encrypt_field(key, new_title) or encrypt(key, b"")
+    username_blob = _encrypt_field(key, new_username)
+    password_blob = _encrypt_field(key, new_password) or encrypt(key, b"")
+    notes_blob = _encrypt_field(key, new_notes)
+    url_blob = _encrypt_field(key, new_url)
+
+    conn.execute(
+        """UPDATE entries SET
+           title_encrypted = ?, username_encrypted = ?, password_encrypted = ?,
+           notes_encrypted = ?, url_encrypted = ?
+           WHERE id = ?""",
+        (title_blob, username_blob, password_blob, notes_blob, url_blob, entry_id),
+    )
+    conn.commit()
+    return True
+
+
+def delete_entry(conn: sqlite3.Connection, entry_id: int, user_id: int) -> bool:
+    """Delete entry by id if it belongs to user (via folder). Returns True if deleted."""
+    cur = conn.execute(
+        """DELETE FROM entries WHERE id = ?
+           AND folder_id IN (SELECT id FROM folders WHERE user_id = ?)""",
+        (entry_id, user_id),
+    )
+    conn.commit()
+    return cur.rowcount == 1

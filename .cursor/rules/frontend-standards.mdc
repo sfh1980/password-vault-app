@@ -1,0 +1,18 @@
+---
+description: Frontend standards for the vault web UI — plain JS, session, clipboard, no secrets
+globs: ["web/**"]
+---
+
+# Frontend standards (web/)
+
+- **Language:** Plain JavaScript only. No TypeScript, no build step, no frameworks.
+- **Session:** Store session ID in `sessionStorage` under a single key (e.g. `vault_session_id`). Send it on every API request as `X-Vault-Session` header. Clear on lock or 401.
+- **API:** Use one shared `api(url, options)` (or equivalent) that adds `X-Vault-Session` and handles 401 (e.g. clear session and show login).
+- **Clipboard:** After copying a password to the clipboard, clear it after 30 seconds (e.g. `setTimeout` + `navigator.clipboard.writeText('')` or similar). Do not log the password.
+- **Secrets:** Never log passwords, session IDs, or keys to the console. Never put them in the DOM in a way that persists.
+- **Inactivity:** Implement an inactivity timeout (e.g. 15 minutes) that locks the vault (clear session, show login).
+- **Accessibility:** Use labels for inputs, sensible focus order, and keyboard-usable controls where possible.
+- **Structure:** Keep `index.html` for structure and `app.js` for behavior; avoid inline scripts with secrets.
+- **New libraries/frameworks:** Any new frontend library or framework (including small helpers) must be sent to the user for approval before use. Do not add dependencies without explicit user approval.
+
+When suggesting or writing frontend code, follow these so the frontend-tester and security-auditor can validate consistently.

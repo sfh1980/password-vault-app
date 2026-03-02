@@ -1,0 +1,17 @@
+---
+description: Security expectations — crypto, auth, no secrets in logs/DOM, injection and XSS prevention
+globs: ["**/*.py", "web/**"]
+---
+
+# Security expectations
+
+- **Key derivation:** Use Argon2id (e.g. via `cryptography.hazmat.primitives.kdf`). Salt must be unique per vault; store with the vault, never reuse for another purpose.
+- **Encryption:** Use AES-256-GCM for sensitive data. Nonce must be unique per encryption; never reuse nonce with the same key.
+- **Comparisons:** Use constant-time comparison (e.g. `hmac.compare_digest`) for passwords, tokens, or session IDs to avoid timing leaks.
+- **Secrets in memory:** Keys and passwords only in memory while needed; avoid logging or serializing them.
+- **Logs and responses:** No passwords, keys, or session IDs in log lines or API response bodies (except where the API is designed to return a generated password for the user to copy).
+- **SQL:** Use parameterized queries only; never concatenate user input into SQL. Apply to all code in `vault_db.py` and any raw SQL.
+- **XSS:** Do not render unsanitized user content into HTML. In the web UI, avoid innerHTML with user data or escape appropriately.
+- **Session:** Session ID in header only (e.g. X-Vault-Session); validate and enforce timeout; lock on invalid or expired session.
+
+When reviewing or writing code that touches auth, crypto, or user data, the security-auditor subagent and these rules should be aligned.

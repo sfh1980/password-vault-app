@@ -1,0 +1,17 @@
+---
+description: Backend standards for the vault API — thin handlers, vault_db/crypto/audit, config, no secrets in logs
+globs: ["src/vault/**"]
+---
+
+# Backend standards (src/vault/)
+
+- **Handlers:** Keep route handlers in `src/vault/api/main.py` **thin**. They should: parse request, call into `vault_db`, `crypto`, `audit`, or session module, return response. No business logic in the route body.
+- **Logic:** Business logic lives in `vault_db.py`, `crypto.py`, `audit.py`, `config.py`, `generator.py`. API only orchestrates.
+- **Config:** Use `vault.config` (environment variables). Never hardcode DB path, session timeout, or log paths.
+- **Secrets:** Never log passwords, session IDs, or decryption keys. Never return them in response bodies except where required (e.g. generated password in response for the client to copy).
+- **Auth:** Protected routes use `_require_session` (or equivalent); invalid or missing session returns 401.
+- **Audit:** Log sensitive actions (unlock, lock, create/update/delete entry, etc.) via `audit.log_event(type, resource_id, user_id)`.
+- **Validation:** Use Pydantic for request bodies; validate input and return 422 or 400 with clear messages.
+- **Errors:** Prefer HTTPException with appropriate status codes; do not leak stack traces or internals to the client.
+
+When suggesting or writing backend code, follow these so backend-tester and security-auditor can validate consistently.

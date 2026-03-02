@@ -1,0 +1,14 @@
+---
+description: Testing and documentation — run tests before marking done; update HOW_IT_WORKS and EDUCATIONAL_CODE_WALKTHROUGH
+globs: ["**/test_*.py", "**/*_test.py", "**/*.md", "**/tests/**"]
+---
+
+# Testing and documentation
+
+- **Tests:** Before marking a task "done," run the relevant tests (e.g. `pytest`). Prefer a test DB or temp file for migrations and DB-dependent tests; do not assume production DB.
+- **New behavior:** When adding features, add or extend tests for the new code (status codes, validation, session required, encryption boundaries as appropriate).
+- **HOW_IT_WORKS.md:** Update when user-facing behavior or steps change. Keep instructions step-by-step, in layman's terms, with "What this does" and "You should see" where helpful.
+- **EDUCATIONAL_CODE_WALKTHROUGH.md:** Update when code or architecture changes. Explain what each part does, how it interacts with the rest of the app, and why (standards, algorithms) in layman's terms. Add teachable moments for patterns that reinforce project practices.
+- **Refactoring:** Per project-context, do not auto-refactor; walk the user through what to change and why so the lesson sticks. Tests and docs should still be updated after refactors.
+
+The verifier subagent and documentation-educator subagent rely on these expectations.

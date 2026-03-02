@@ -1,0 +1,44 @@
+---
+description: When and how to use domain subagents and handoffs for multi-step or cross-domain work
+alwaysApply: false
+globs: ["**/*.py", "**/*.js", "**/web/**", "**/migrations/**", "**/docs/**"]
+---
+
+# Agent orchestration — when to use subagents and handoffs
+
+## Permission and flow
+
+- **Before starting any domain trio:** Explicitly ask the user: e.g. "I'll run the frontend trio for [feature]. Proceed?" Wait for yes/no. Do not run until the user confirms. This keeps hallucinations and unwanted actions to a minimum.
+- **After each domain trio completes:** Ask the user "Do you want to git commit?" Accept yes or no; keep asking at each trio completion.
+- **Security-auditor (PRs):** Before running security-auditor, say "This is a PR for [X]. Running security-auditor is recommended. Proceed?" Run only after the user says yes. (After a few PRs the user may choose to make this automatic.)
+- **Handoffs:** Keep handoffs **short and focused**. Planners and testers output only what the next agent needs. Run **verifier** on the critical path (e.g. before integration-reviewer), not after every small change, to help with token cost.
+- **Status note:** After big steps, update `docs/agent-status.md` with last step completed and next step (e.g. "Last: frontend-tester completed 2025-02-03; next: backend-planner").
+
+## Domain trios (frontend, backend, database)
+
+Each domain has three subagents: **planner**, **developer**, **tester**. Use them in that order for features in that domain.
+
+- **Planner** produces a handoff (scope, decisions, API/schema contract). Invoke: `/frontend-planner`, `/backend-planner`, or `/database-planner`, or ask "have frontend-planner plan …".
+- **Developer** implements from the handoff and produces a short handoff for the tester. Invoke: `/frontend-developer`, etc., and pass the planner's output or path.
+- **Tester** verifies and reports pass/fail. Invoke: `/frontend-tester`, etc., and pass the developer's handoff or path.
+
+Handoff location: `docs/handoffs/` (e.g. `frontend-YYYYMMDD.md`). Frontend and backend share a **written API contract** (in handoffs or `docs/api-contract.md`): exact endpoints, request/response shapes so both sides stay aligned.
+
+**Testing:** Standard layout is `tests/`. Backend-tester and database-tester run `pytest tests/` from repo root with the project venv.
+
+## Cross-domain work
+
+When a feature touches multiple domains (e.g. recovery key: backend + database + minimal UI):
+
+1. Run each domain's trio in a sensible order (e.g. database plan → backend plan → implement DB → implement backend → frontend implement → test each). Ask "Proceed?" before each trio.
+2. After **all three** domain trios have produced handoffs, invoke **integration-reviewer** with paths to those handoffs (or paste them). It produces a single **master decision** doc in `docs/handoffs/master-YYYYMMDD.md`. If integration-reviewer finds bugs, report to the user; the user reassigns in their own words (e.g. "have frontend-developer fix the login button").
+3. If a tester says a **refactor** is needed: present the suggestion to the user and wait. Do not auto re-invoke the planner or developer until the user responds.
+
+## When to use which subagents
+
+- **Single-domain feature:** Ask "Proceed?" → run that domain's planner → developer → tester in one go; then ask "Do you want to git commit?" Run **verifier** after (on critical path). Run **documentation-educator** to update HOW_IT_WORKS.md and VOCAB.md only (no EDUCATIONAL_CODE_WALKTHROUGH or teachable moments until the user says "completion").
+- **Cross-domain feature:** Run relevant domain trios (with Proceed? each time), then **integration-reviewer**; then verifier and documentation-educator as above.
+- **Security review:** Ask "Running security-auditor is recommended. Proceed?" then invoke **security-auditor** if the user says yes.
+- **After "done":** Invoke **verifier**; invoke **documentation-educator** (HOW_IT_WORKS + VOCAB only).
+
+All custom subagents are defined in `.cursor/agents/`. See `.cursor/agents/README.md` for the full roster and examples.
