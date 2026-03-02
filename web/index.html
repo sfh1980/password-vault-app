@@ -6,65 +6,385 @@
   <title>Vault</title>
   <style>
     * { box-sizing: border-box; }
-    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 1rem auto; padding: 0 1rem; }
-    h1 { font-size: 1.25rem; }
-    input, button, textarea { font-size: 1rem; padding: 0.35rem 0.5rem; margin: 0.25rem 0; }
-    button { cursor: pointer; }
-    .hidden { display: none; }
-    .error { color: #c00; margin: 0.5rem 0; }
-    .message { color: #060; margin: 0.5rem 0; }
-    #vault-activity { outline: 1px solid #ccc; padding: 1rem; margin-top: 1rem; }
-    ul { list-style: none; padding: 0; }
-    li { padding: 0.35rem 0; border-bottom: 1px solid #eee; }
+    :root {
+      /* Slightly darker, calmer background */
+      --bg: #0f172a;
+      --bg-end: #020617;
+      --card: #0b1220;
+      --text: #e5e7eb;
+      --text-muted: #9ca3af;
+      --accent: #22c55e;
+      --accent-hover: #16a34a;
+      --border: rgba(148, 163, 184, 0.5);
+      --error: #f97373;
+      --success: #4ade80;
+      --radius: 10px;
+      --shadow: 0 1px 3px rgba(15,23,42,0.6);
+      --shadow-card: 0 18px 45px rgba(15,23,42,0.7);
+    }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0;
+      padding: 2.5rem 2rem;
+      min-height: 100vh;
+      background: radial-gradient(circle at top, #1e293b 0%, var(--bg) 45%, var(--bg-end) 100%);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    #layout {
+      max-width: 1400px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.8fr) minmax(0, 1.1fr);
+      gap: 1.75rem;
+      align-items: flex-start;
+    }
+    @media (max-width: 960px) {
+      #layout {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      #left-panel,
+      #right-panel {
+        display: none;
+      }
+    }
+    #left-panel,
+    #right-panel {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+    #left-panel h2,
+    #right-panel h2 {
+      font-size: 1rem;
+      margin-top: 0;
+    }
+    #left-panel ul {
+      list-style: disc;
+      margin-left: 1.1rem;
+      padding-left: 0;
+    }
+    #left-panel {
+      background: radial-gradient(circle at top left, rgba(15,118,110,0.26), rgba(15,23,42,0.96));
+    }
+    #login-screen.page-card {
+      background: radial-gradient(circle at top, rgba(59,130,246,0.26), rgba(15,23,42,0.96));
+    }
+    #vault-screen .page-card {
+      background: radial-gradient(circle at top right, rgba(217,119,6,0.22), rgba(15,23,42,0.96));
+    }
+    #right-panel {
+      background: radial-gradient(circle at top, rgba(168,85,247,0.26), rgba(15,23,42,0.96));
+    }
+    #quote-body {
+      margin-top: 0.5rem;
+    }
+    #quote-text {
+      font-style: italic;
+      display: block;
+    }
+    #quote-author {
+      display: block;
+      margin-top: 0.25rem;
+    }
+    #quote-meta {
+      margin-top: 0.35rem;
+      font-size: 0.85rem;
+    }
+    h1 { font-size: 1.35rem; font-weight: 600; margin-bottom: 0.25rem; color: var(--text); }
+    h2 { font-size: 1.1rem; font-weight: 600; color: var(--text); margin: 1rem 0 0.5rem; }
+    h3 { font-size: 1rem; font-weight: 600; margin: 0.5rem 0; }
+    input, textarea {
+      font-size: 1rem;
+      padding: 0.5rem 0.6rem;
+      margin: 0.25rem 0;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--card);
+      color: var(--text);
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+    input:focus, textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.15);
+    }
+    button {
+      cursor: pointer;
+      font-size: 1rem;
+      padding: 0.5rem 0.85rem;
+      border-radius: 6px;
+      border: none;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 500;
+      transition: background-color 0.2s ease, transform 0.15s ease;
+    }
+    button:hover { background: var(--accent-hover); transform: translateY(-1px); }
+    button:active { transform: translateY(0); }
+    .btn-secondary {
+      background: var(--border);
+      color: var(--text);
+    }
+    .btn-secondary:hover { background: #cbd5e1; }
+    .hidden { display: none !important; }
+    .error { color: var(--error); margin: 0.5rem 0; font-size: 0.9rem; }
+    .message { color: var(--success); margin: 0.5rem 0; font-size: 0.9rem; }
+    .page-card {
+      background: rgba(15,23,42,0.88);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-card);
+      padding: 1.75rem 2rem;
+      margin-bottom: 1rem;
+      border: 1px solid var(--border);
+    }
+    #login-screen .page-card { max-width: 28rem; }
+    #vault-activity {
+      background: linear-gradient(145deg, rgba(15,23,42,0.9), rgba(15,23,42,0.85));
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-card);
+      padding: 1.25rem 1.5rem;
+      margin-top: 1rem;
+      border: 1px solid var(--border);
+    }
+    ul { list-style: none; padding: 0; margin: 0; }
+    li {
+      padding: 0.5rem 0;
+      border-bottom: 1px solid var(--border);
+      transition: background 0.15s ease;
+    }
+    li:last-child { border-bottom: none; }
+    li:hover { background: rgba(13, 148, 136, 0.06); }
     li button { margin-left: 0.5rem; }
-    .entry-detail { margin-top: 1rem; padding: 1rem; background: #f8f8f8; }
-    .entry-detail p { margin: 0.35rem 0; }
-    #add-entry-form { margin-top: 1rem; }
-    #add-entry-form label { display: block; margin-top: 0.5rem; }
-    #add-entry-form input, #add-entry-form textarea { width: 100%; }
-    #add-folder-form { margin: 0.5rem 0; }
+    .entry-detail {
+      margin-top: 1rem;
+      padding: 1rem 1.25rem;
+      background: radial-gradient(circle at top, rgba(15,23,42,0.95) 0%, rgba(15,23,42,0.9) 55%, rgba(15,23,42,0.85) 100%);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+    }
+    .entry-detail p { margin: 0.4rem 0; }
+    #add-entry-form, #add-folder-form {
+      margin-top: 0.75rem;
+      overflow: hidden;
+      max-height: 0;
+      opacity: 0;
+      transition: max-height 0.3s ease, opacity 0.25s ease;
+    }
+    #add-entry-form.visible, #add-folder-form.visible {
+      max-height: 600px;
+      opacity: 1;
+    }
+    #add-entry-form label, #add-entry-form input, #add-entry-form textarea { display: block; margin-top: 0.35rem; }
+    #add-entry-form input, #add-entry-form textarea { width: 100%; max-width: 24rem; }
     #add-folder-form input { margin-right: 0.5rem; }
     #search-box { margin-bottom: 0.5rem; }
-    #search-box input { margin-right: 0.5rem; min-width: 12rem; }
+    #search-box input { margin-right: 0.5rem; min-width: 14rem; }
     #search-results { margin: 0.5rem 0; }
     #search-results-list li { cursor: pointer; }
+    .empty-state {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      padding: 1rem 0;
+      text-align: center;
+    }
+    .login-intro { color: var(--text-muted); margin-bottom: 1.25rem; line-height: 1.55; max-width: 36rem; }
+    .login-section { margin-bottom: 1rem; }
+    .login-recovery-link { font-size: 0.9rem; margin-top: 0.75rem; }
+    .login-recovery-link button, button.login-recovery-link {
+      background: none; border: none; padding: 0; color: var(--accent);
+      text-decoration: underline; cursor: pointer; font-size: inherit;
+      transition: color 0.2s ease;
+    }
+    .login-recovery-link button:hover, button.login-recovery-link:hover { color: var(--accent-hover); }
+    .login-recovery-note { font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem; max-width: 32rem; }
+    .setup-intro { margin-bottom: 1rem; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    .fade-in { animation: fadeIn 0.25s ease forwards; }
+    #recovery-setup-result {
+      margin: 0.5rem 0;
+      padding: 0.75rem 1rem;
+      background: #fef3c7;
+      border: 1px solid #f59e0b;
+      border-radius: var(--radius);
+    }
+    #recovery-required-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      padding: 1rem;
+    }
+    #recovery-required-overlay .overlay-card {
+      max-width: 28rem;
+      width: 100%;
+    }
+    #recovery-required-overlay .recovery-choice {
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: 1rem 1.25rem;
+      margin: 0.5rem 0;
+      border-radius: var(--radius);
+      border: 2px solid var(--border);
+      background: var(--card);
+      cursor: pointer;
+      transition: border-color 0.2s ease, background 0.2s ease;
+    }
+    #recovery-required-overlay .recovery-choice:hover {
+      border-color: var(--accent);
+      background: rgba(13, 148, 136, 0.06);
+    }
+    #recovery-required-overlay .recovery-choice strong { display: block; margin-bottom: 0.25rem; }
+    #recovery-required-overlay .recovery-choice span { font-size: 0.9rem; color: var(--text-muted); }
+    #recovery-questions-setup-form label { display: block; margin-top: 0.5rem; }
+    #recovery-questions-setup-form input { width: 100%; max-width: 24rem; }
+    .recovery-qa-warning { font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem; }
   </style>
 </head>
 <body>
-  <div id="login-screen">
-    <h1>Vault</h1>
+  <div id="layout">
+    <aside id="left-panel" class="page-card">
+      <h2>Staying safe online</h2>
+      <ul>
+        <li>Use a unique password for each important account (email, banking, social media).</li>
+        <li>Turn on multi-factor authentication (MFA) wherever possible.</li>
+        <li>Never paste passwords into chat apps or email; use your vault to copy and paste directly into the site.</li>
+        <li>Always check the address bar before logging in—look for the correct domain name, not just the logo.</li>
+      </ul>
+      <p style="margin-top: 0.75rem; font-size: 0.85rem;">
+        These are general tips only. Your threat model may need stricter habits.
+      </p>
+    </aside>
+
+    <main id="center-panel">
+  <div id="login-screen" class="page-card">
+    <h1>Password Vault</h1>
     <p id="login-message" class="message hidden"></p>
     <p id="login-error" class="error hidden"></p>
-    <div id="unlock-password-area">
-      <form id="login-form">
-        <label for="password">Master password</label>
-        <input type="password" id="password" name="password" autocomplete="current-password">
-        <button type="submit">Unlock</button>
-      </form>
-      <p style="margin-top: 0.75rem;"><button type="button" id="show-recovery-unlock">Unlock with recovery key</button></p>
+
+    <!-- First-time setup: shown when vault is not initialized -->
+    <div id="first-time-setup-area" class="hidden">
+      <p class="login-intro setup-intro" role="doc-subtitle">
+        <strong>First time here?</strong> Create your vault by choosing a <strong>master password</strong>. This password will unlock your vault from now on. Choose something strong and don’t share it. You can set up a recovery key later (after you unlock) in case you forget the password.
+      </p>
+      <div class="login-section">
+        <form id="setup-form">
+          <label for="setup-password">Choose master password</label>
+          <input type="password" id="setup-password" name="password" autocomplete="new-password" placeholder="Enter a password" required style="min-width: 14rem; display: block; margin: 0.25rem 0;">
+          <label for="setup-confirm">Confirm master password</label>
+          <input type="password" id="setup-confirm" name="confirm" autocomplete="new-password" placeholder="Enter the same password again" required style="min-width: 14rem; display: block; margin: 0.25rem 0;">
+          <button type="submit" style="margin-top: 0.5rem;">Create vault</button>
+        </form>
+      </div>
     </div>
+
+    <!-- Unlock: shown when vault is already initialized -->
+    <p class="login-intro" id="unlock-intro" role="doc-subtitle">
+      This is your personal password vault. Enter your <strong>master password</strong> below to unlock it and see your saved logins. Your data is stored on this device and encrypted—only someone with your password (or recovery key) can open it.
+    </p>
+    <div id="unlock-password-area">
+      <div class="login-section">
+        <label for="password">Master password</label>
+        <p class="login-recovery-note" id="password-hint">The one password you chose when you first set up the vault.</p>
+        <form id="login-form" style="display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.25rem;">
+          <input type="password" id="password" name="password" autocomplete="current-password" placeholder="Enter your master password" style="min-width: 14rem;">
+          <button type="submit">Unlock</button>
+        </form>
+      </div>
+      <p class="login-recovery-link">
+        <button type="button" id="show-recovery-unlock">Forgot your password? Use your recovery key instead.</button>
+      </p>
+    </div>
+
     <div id="unlock-recovery-area" class="hidden">
-      <label for="recovery-key-input">Recovery key</label>
-      <textarea id="recovery-key-input" rows="4" placeholder="Paste your recovery key (shown once when you set it up)" aria-label="Recovery key"></textarea>
-      <button type="button" id="unlock-with-recovery-btn">Unlock</button>
-      <button type="button" id="back-to-password-btn">Back to password</button>
+      <div class="login-section">
+        <label for="recovery-key-input">Recovery key</label>
+        <p class="login-recovery-note">Paste the long key you saved when you set up recovery. You only get this key once—if you didn’t save it, you’ll need your master password.</p>
+        <textarea id="recovery-key-input" rows="4" placeholder="Paste your recovery key here…" aria-label="Recovery key" style="width: 100%; max-width: 28rem; margin-top: 0.25rem;"></textarea>
+        <p style="margin-top: 0.5rem;">
+          <button type="button" id="unlock-with-recovery-btn">Unlock with recovery key</button>
+          <button type="button" id="back-to-password-btn" class="login-recovery-link" style="margin-left: 0.5rem;">← Back to password</button>
+        </p>
+      </div>
+      <p class="login-recovery-link" style="margin-top: 0.75rem;">
+        <button type="button" id="show-recovery-questions-unlock">Or unlock with 3 security questions</button>
+      </p>
+    </div>
+    <div id="unlock-questions-area" class="hidden">
+      <div class="login-section">
+        <p class="login-recovery-note">Answer the three questions you set up. Answers are case-sensitive.</p>
+        <div id="unlock-questions-form-container"></div>
+        <p style="margin-top: 0.5rem;">
+          <button type="button" id="unlock-with-questions-btn">Unlock with answers</button>
+          <button type="button" id="back-from-questions-btn" class="login-recovery-link" style="margin-left: 0.5rem;">← Back</button>
+        </p>
+      </div>
     </div>
   </div>
 
   <div id="vault-screen" class="hidden">
-    <h1>Vault</h1>
+    <div class="page-card" style="margin-bottom: 0.5rem;">
+      <h1 style="margin-bottom: 0.5rem;">Vault</h1>
     <p id="session-message" class="message hidden"></p>
     <p id="vault-error" class="error hidden"></p>
     <button type="button" id="lock-btn">Lock</button>
+    <p style="margin-top: 0.5rem; font-size: 0.85rem;">
+      <button type="button" id="reset-vault-btn" class="login-recovery-link">Reset vault (for testing)</button>
+    </p>
     <div id="recovery-area" style="margin: 0.5rem 0;">
       <button type="button" id="setup-recovery-btn" class="hidden">Set up recovery key</button>
       <p id="recovery-configured-msg" class="message hidden">Recovery key is set.</p>
     </div>
-    <div id="recovery-setup-result" class="hidden" style="margin: 0.5rem 0; padding: 0.5rem; background: #fff3cd; border: 1px solid #ffc107;">
+    <div id="recovery-setup-result" class="hidden">
       <p><strong>Save this recovery key offline. You will not see it again.</strong> If you forget your master password, you can unlock the vault with this key.</p>
       <pre id="recovery-key-display" style="word-break: break-all; margin: 0.5rem 0;"></pre>
       <button type="button" id="copy-recovery-key-btn">Copy</button>
       <button type="button" id="recovery-saved-btn">I've saved it</button>
+    </div>
+    </div>
+
+    <div id="recovery-required-overlay" class="hidden">
+      <div class="page-card overlay-card" style="margin: 0;">
+        <h2>Set up recovery (required)</h2>
+        <p class="login-intro" style="margin-bottom: 1rem;">If you forget your master password, you can regain access using one of these. Choose one before continuing.</p>
+        <div id="recovery-required-choices">
+          <button type="button" class="recovery-choice" id="recovery-required-key">
+            <strong>Use recovery key</strong>
+            <span>We'll show you a long one-time key. Save it somewhere safe (e.g. printed or in a safe). Most secure option.</span>
+          </button>
+          <button type="button" class="recovery-choice" id="recovery-required-questions">
+            <strong>Use 3 security questions</strong>
+            <span>Choose three questions and answers you'll remember. Easier than storing a long key, but choose answers that are hard for others to guess.</span>
+          </button>
+        </div>
+        <div id="recovery-required-key-flow" class="hidden">
+          <p><strong>Save this recovery key offline. You will not see it again.</strong></p>
+          <pre id="recovery-required-key-display" style="word-break: break-all; margin: 0.5rem 0;"></pre>
+          <button type="button" id="recovery-required-copy-btn">Copy</button>
+          <button type="button" id="recovery-required-saved-btn">I've saved it</button>
+        </div>
+        <div id="recovery-required-questions-flow" class="hidden">
+          <p class="recovery-qa-warning">Pick questions only you know the answer to. Avoid anything others could find (e.g. on social media).</p>
+          <form id="recovery-questions-setup-form">
+            <label for="req-q1">Question 1</label>
+            <input type="text" id="req-q1" name="question_1" required placeholder="e.g. What was your first pet's name?">
+            <label for="req-a1">Answer 1</label>
+            <input type="password" id="req-a1" name="answer_1" required placeholder="Your answer">
+            <label for="req-q2">Question 2</label>
+            <input type="text" id="req-q2" name="question_2" required placeholder="e.g. Where did you go to high school?">
+            <label for="req-a2">Answer 2</label>
+            <input type="password" id="req-a2" name="answer_2" required placeholder="Your answer">
+            <label for="req-q3">Question 3</label>
+            <input type="text" id="req-q3" name="question_3" required placeholder="e.g. What was your first car model?">
+            <label for="req-a3">Answer 3</label>
+            <input type="password" id="req-a3" name="answer_3" required placeholder="Your answer">
+            <button type="submit">Save recovery questions</button>
+          </form>
+        </div>
+      </div>
     </div>
 
     <div id="vault-activity">
@@ -79,19 +399,21 @@
       </div>
       <h2>Folders</h2>
       <button type="button" id="add-folder-btn">Create folder</button>
-      <div id="add-folder-form" class="hidden">
+      <div id="add-folder-form">
         <form id="new-folder-form">
           <label for="new-folder-name">Folder name</label>
           <input type="text" id="new-folder-name" name="name" required placeholder="e.g. Work, Shopping">
           <button type="submit" id="save-folder-btn">Save</button>
         </form>
-        <button type="button" id="cancel-folder-btn">Cancel</button>
+        <button type="button" id="cancel-folder-btn" class="btn-secondary">Cancel</button>
       </div>
       <ul id="folder-list"></ul>
+      <p id="folder-list-empty" class="empty-state hidden">No folders yet — create one above.</p>
       <h2 id="entries-heading">Entries</h2>
       <ul id="entry-list"></ul>
+      <p id="entry-list-empty" class="empty-state hidden">No entries in this folder — add one below.</p>
       <div id="entry-detail" class="entry-detail hidden"></div>
-      <div id="add-entry-form" class="hidden">
+      <div id="add-entry-form" aria-hidden="true">
         <h3>Add entry</h3>
         <form id="new-entry-form">
           <input type="hidden" id="new-entry-folder-id" name="folder_id">
@@ -111,6 +433,18 @@
       </div>
       <button type="button" id="add-entry-btn">Add entry</button>
     </div>
+  </div>
+    </main>
+
+    <aside id="right-panel" class="page-card">
+      <h2>Today’s thought</h2>
+      <div id="quote-body">
+        <span id="quote-text">Loading quote…</span>
+        <span id="quote-author"></span>
+      </div>
+      <p id="quote-meta">Quotes are fetched from the internet and cached in your browser for 24 hours.</p>
+      <p id="quote-error" class="error hidden"></p>
+    </aside>
   </div>
 
   <script src="/static/app.js"></script>

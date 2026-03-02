@@ -46,9 +46,55 @@
   const recoveryConfiguredMsg = document.getElementById('recovery-configured-msg');
   const recoverySetupResult = document.getElementById('recovery-setup-result');
   const recoveryKeyDisplay = document.getElementById('recovery-key-display');
+  const firstTimeSetupArea = document.getElementById('first-time-setup-area');
+  const setupForm = document.getElementById('setup-form');
+  const unlockIntro = document.getElementById('unlock-intro');
+  const folderListEmpty = document.getElementById('folder-list-empty');
+  const entryListEmpty = document.getElementById('entry-list-empty');
+  const recoveryRequiredOverlay = document.getElementById('recovery-required-overlay');
+  const recoveryRequiredChoices = document.getElementById('recovery-required-choices');
+  const recoveryRequiredKeyFlow = document.getElementById('recovery-required-key-flow');
+  const recoveryRequiredKeyDisplay = document.getElementById('recovery-required-key-display');
+  const recoveryRequiredQuestionsFlow = document.getElementById('recovery-required-questions-flow');
+  const unlockQuestionsArea = document.getElementById('unlock-questions-area');
+  const unlockQuestionsFormContainer = document.getElementById('unlock-questions-form-container');
+  const quoteText = document.getElementById('quote-text');
+  const quoteAuthor = document.getElementById('quote-author');
+  const quoteError = document.getElementById('quote-error');
 
   /** Folder id for the currently listed entries (so we can refresh after edit/delete). */
   let currentFolderId = null;
+
+  /**
+   * Fetch vault status and show either first-time setup or unlock form.
+   * Does not require session. Use after load (no session) or after reset.
+   */
+  function applyVaultStatus(initialized) {
+    loginError.classList.add('hidden');
+    loginMessage.classList.add('hidden');
+    if (initialized) {
+      firstTimeSetupArea.classList.add('hidden');
+      unlockIntro.classList.remove('hidden');
+      unlockPasswordArea.classList.remove('hidden');
+      unlockRecoveryArea.classList.add('hidden');
+    } else {
+      firstTimeSetupArea.classList.remove('hidden');
+      unlockIntro.classList.add('hidden');
+      unlockPasswordArea.classList.add('hidden');
+      unlockRecoveryArea.classList.add('hidden');
+    }
+  }
+
+  function loadLoginScreen() {
+    fetch('/vault/status')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        applyVaultStatus(data.initialized);
+      })
+      .catch(function () {
+        applyVaultStatus(true);
+      });
+  }
 
   function getSessionId() {
     return sessionStorage.getItem('vault_session_id');
@@ -74,25 +120,91 @@
       if (res.status === 401) {
         setSessionId(null);
         showLogin('Session expired or invalid.');
+        loadLoginScreen();
         throw new Error('Unauthorized');
       }
       return res;
     });
   }
 
+  function setQuote(content, author) {
+    if (!quoteText) return;
+    quoteText.textContent = content ? '“' + content + '”' : '';
+    if (quoteAuthor) {
+      quoteAuthor.textContent = author ? '— ' + author : '';
+    }
+    if (quoteError) {
+      quoteError.classList.add('hidden');
+      quoteError.textContent = '';
+    }
+  }
+
+  function loadQuoteOfDay() {
+    if (!quoteText) return;
+    var CACHE_KEY = 'vault_side_quote';
+    var TS_KEY = 'vault_side_quote_ts';
+    var ONE_DAY_MS = 24 * 60 * 60 * 1000;
+    try {
+      var now = Date.now();
+      var tsStr = window.localStorage ? window.localStorage.getItem(TS_KEY) : null;
+      var cached = window.localStorage ? window.localStorage.getItem(CACHE_KEY) : null;
+      if (tsStr && cached) {
+        var ts = parseInt(tsStr, 10);
+        if (!Number.isNaN(ts) && now - ts < ONE_DAY_MS) {
+          var data = JSON.parse(cached);
+          setQuote(data.content, data.author);
+          return;
+        }
+      }
+    } catch (e) {
+      // Ignore cache errors and fall back to fetching.
+    }
+
+    fetch('https://api.quotable.io/random?maxLength=140')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var content = data && data.content ? data.content : '';
+        var author = data && data.author ? data.author : '';
+        if (!content) {
+          throw new Error('No quote content');
+        }
+        setQuote(content, author);
+        try {
+          if (window.localStorage) {
+            window.localStorage.setItem(CACHE_KEY, JSON.stringify({ content: content, author: author }));
+            window.localStorage.setItem(TS_KEY, String(Date.now()));
+          }
+        } catch (e) {
+          // Ignore storage failures.
+        }
+      })
+      .catch(function () {
+        setQuote('Security is a process, not a product.', 'Bruce Schneier');
+        if (quoteError) {
+          quoteError.textContent = 'Offline or quote service unavailable.';
+          quoteError.classList.remove('hidden');
+        }
+      });
+  }
+
   function showLogin(message) {
     vaultScreen.classList.add('hidden');
+    vaultScreen.classList.remove('fade-in');
     loginScreen.classList.remove('hidden');
+    loginScreen.classList.add('fade-in');
     loginError.classList.add('hidden');
     loginMessage.classList.remove('hidden');
     loginMessage.textContent = message || '';
     if (!message) loginMessage.classList.add('hidden');
     stopInactivityTimer();
+    loadLoginScreen();
   }
 
   function showVault() {
     loginScreen.classList.add('hidden');
+    loginScreen.classList.remove('fade-in');
     vaultScreen.classList.remove('hidden');
+    vaultScreen.classList.add('fade-in');
     loginError.classList.add('hidden');
     vaultError.classList.add('hidden');
     sessionMessage.classList.add('hidden');
@@ -146,8 +258,21 @@
   }
 
   function hideCreateFolderForm() {
-    addFolderForm.classList.add('hidden');
+    addFolderForm.classList.remove('visible');
     newFolderNameInput.value = '';
+  }
+
+  function showRecoveryRequiredOverlay() {
+    if (!recoveryRequiredOverlay) return;
+    recoveryRequiredOverlay.classList.remove('hidden');
+    recoveryRequiredChoices.classList.remove('hidden');
+    recoveryRequiredKeyFlow.classList.add('hidden');
+    recoveryRequiredQuestionsFlow.classList.add('hidden');
+  }
+
+  function hideRecoveryRequiredOverlay() {
+    if (!recoveryRequiredOverlay) return;
+    recoveryRequiredOverlay.classList.add('hidden');
   }
 
   function loadRecoveryStatus() {
@@ -157,9 +282,12 @@
         if (data.configured) {
           setupRecoveryBtn.classList.add('hidden');
           recoveryConfiguredMsg.classList.remove('hidden');
+          recoveryConfiguredMsg.textContent = 'Recovery is set (key or questions).';
+          hideRecoveryRequiredOverlay();
         } else {
           setupRecoveryBtn.classList.remove('hidden');
           recoveryConfiguredMsg.classList.add('hidden');
+          showRecoveryRequiredOverlay();
         }
         recoverySetupResult.classList.add('hidden');
       })
@@ -182,11 +310,15 @@
           loadEntries(f.id);
           addEntryBtn.dataset.folderId = String(f.id);
           entryDetail.classList.add('hidden');
-          addEntryForm.classList.add('hidden');
+          addEntryForm.classList.remove('visible');
         });
         li.appendChild(btn);
         folderList.appendChild(li);
       });
+      if (folderListEmpty) {
+        if (folders.length === 0) folderListEmpty.classList.remove('hidden');
+        else folderListEmpty.classList.add('hidden');
+      }
     });
   }
 
@@ -257,6 +389,10 @@
         });
         entryList.appendChild(li);
       });
+      if (entryListEmpty) {
+        if (entries.length === 0) entryListEmpty.classList.remove('hidden');
+        else entryListEmpty.classList.add('hidden');
+      }
     });
   }
 
@@ -267,8 +403,8 @@
       (entry.url ? '<p>URL: <a href="' + escapeHtml(entry.url) + '" target="_blank" rel="noopener">' + escapeHtml(entry.url) + '</a></p>' : '') +
       (entry.notes ? '<p>Notes: ' + escapeHtml(entry.notes) + '</p>' : '') +
       '<button type="button" id="copy-detail-password">Copy password</button> ' +
-      '<button type="button" id="edit-entry-btn">Edit</button> ' +
-      '<button type="button" id="delete-entry-btn">Delete</button>' +
+      '<button type="button" id="edit-entry-btn" class="btn-secondary">Edit</button> ' +
+      '<button type="button" id="delete-entry-btn" class="btn-secondary">Delete</button>' +
       '<div id="edit-entry-form" class="hidden" style="margin-top:1rem;"></div>';
     entryDetail.classList.remove('hidden');
     entryDetail.dataset.entryId = String(entry.id);
@@ -298,7 +434,7 @@
       '<label for="edit-password">Password</label><input type="password" id="edit-password" value="' + escapeHtml(entry.password) + '"> <button type="button" id="edit-generate-password">Generate</button> ' +
       '<label for="edit-url">URL</label><input type="url" id="edit-url" value="' + escapeHtml(entry.url || '') + '"> ' +
       '<label for="edit-notes">Notes</label><textarea id="edit-notes" rows="2">' + escapeHtml(entry.notes || '') + '</textarea> ' +
-      '<button type="submit">Save</button> <button type="button" id="edit-cancel-btn">Cancel</button>' +
+      '<button type="submit">Save</button> <button type="button" id="edit-cancel-btn" class="btn-secondary">Cancel</button>' +
       '</form>';
     formEl.classList.remove('hidden');
     document.getElementById('entry-edit-form').addEventListener('submit', function (e) {
@@ -428,12 +564,126 @@
     unlockWithPayload({ recovery_key: key });
   });
 
+  document.getElementById('show-recovery-questions-unlock').addEventListener('click', function () {
+    fetch('/recovery/questions')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data.questions_configured || !data.questions || data.questions.length !== 3) {
+          loginError.textContent = 'Security questions are not set up for this vault.';
+          loginError.classList.remove('hidden');
+          return;
+        }
+        unlockRecoveryArea.classList.add('hidden');
+        unlockQuestionsArea.classList.remove('hidden');
+        loginError.classList.add('hidden');
+        unlockQuestionsFormContainer.innerHTML = '';
+        data.questions.forEach(function (q, i) {
+          const label = document.createElement('label');
+          label.setAttribute('for', 'unlock-answer-' + (i + 1));
+          label.textContent = q || 'Question ' + (i + 1);
+          const input = document.createElement('input');
+          input.type = 'password';
+          input.id = 'unlock-answer-' + (i + 1);
+          input.placeholder = 'Your answer';
+          input.dataset.index = String(i);
+          unlockQuestionsFormContainer.appendChild(label);
+          unlockQuestionsFormContainer.appendChild(input);
+        });
+      })
+      .catch(function () {
+        loginError.textContent = 'Could not load recovery questions.';
+        loginError.classList.remove('hidden');
+      });
+  });
+
+  document.getElementById('back-from-questions-btn').addEventListener('click', function () {
+    unlockQuestionsArea.classList.add('hidden');
+    unlockRecoveryArea.classList.remove('hidden');
+    unlockQuestionsFormContainer.innerHTML = '';
+    loginError.classList.add('hidden');
+  });
+
+  document.getElementById('unlock-with-questions-btn').addEventListener('click', function () {
+    const inputs = unlockQuestionsFormContainer.querySelectorAll('input[type="password"]');
+    if (!inputs || inputs.length !== 3) {
+      loginError.textContent = 'Answer all three questions.';
+      loginError.classList.remove('hidden');
+      return;
+    }
+    const answers = [inputs[0].value, inputs[1].value, inputs[2].value];
+    if (answers.some(function (a) { return !a.trim(); })) {
+      loginError.textContent = 'Answer all three questions.';
+      loginError.classList.remove('hidden');
+      return;
+    }
+    loginError.classList.add('hidden');
+    unlockWithPayload({ recovery_answers: answers });
+  });
+
+  setupForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    const pwd = document.getElementById('setup-password').value;
+    const confirm = document.getElementById('setup-confirm').value;
+    loginError.classList.add('hidden');
+    if (pwd !== confirm) {
+      loginError.textContent = 'Passwords do not match.';
+      loginError.classList.remove('hidden');
+      return;
+    }
+    if (!pwd.trim()) {
+      loginError.textContent = 'Enter a password.';
+      loginError.classList.remove('hidden');
+      return;
+    }
+    fetch('/setup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pwd }),
+    })
+      .then(function (r) {
+        if (!r.ok) return r.json().then(function (d) { throw new Error(d.detail || 'Setup failed'); });
+        return r.json();
+      })
+      .then(function (data) {
+        setSessionId(data.session_id);
+        document.getElementById('setup-password').value = '';
+        document.getElementById('setup-confirm').value = '';
+        showVault();
+        loadFolders().then(function () { loadRecoveryStatus(); });
+      })
+      .catch(function (err) {
+        loginError.textContent = err.message || 'Setup failed.';
+        loginError.classList.remove('hidden');
+      });
+  });
+
+  document.getElementById('reset-vault-btn').addEventListener('click', function () {
+    const pwd = prompt('Enter your master password to reset the vault (for testing). This will delete all data.');
+    if (pwd === null || pwd === '') return;
+    fetch('/vault/reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pwd }),
+    })
+      .then(function (r) {
+        if (!r.ok) return r.json().then(function (d) { throw new Error(d.detail || 'Reset failed'); });
+        return r.json();
+      })
+      .then(function () {
+        setSessionId(null);
+        showLogin('Vault reset. You can create a new vault below.');
+      })
+      .catch(function (err) {
+        showVaultError(err.message || 'Reset failed.');
+      });
+  });
+
   lockBtn.addEventListener('click', function () {
     lock();
   });
 
   addFolderBtn.addEventListener('click', function () {
-    addFolderForm.classList.remove('hidden');
+    addFolderForm.classList.add('visible');
     newFolderNameInput.focus();
     resetInactivityTimer();
   });
@@ -490,7 +740,7 @@
       showVaultError('Select a folder first.');
       return;
     }
-    addEntryForm.classList.remove('hidden');
+    addEntryForm.classList.add('visible');
     document.getElementById('new-entry-folder-id').value = folderId;
     resetInactivityTimer();
   });
@@ -513,7 +763,7 @@
       .then(function (r) { return r.json(); })
       .then(function () {
         newEntryForm.reset();
-        addEntryForm.classList.add('hidden');
+        addEntryForm.classList.remove('visible');
         loadEntries(folderId);
         resetInactivityTimer();
       })
@@ -561,7 +811,89 @@
     resetInactivityTimer();
   });
 
-  // On load: if we have a session, try to use it
+  if (document.getElementById('recovery-required-key')) {
+    document.getElementById('recovery-required-key').addEventListener('click', function () {
+      recoveryRequiredChoices.classList.add('hidden');
+      api('/recovery/setup', { method: 'POST' })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          recoveryRequiredKeyDisplay.textContent = data.recovery_key;
+          recoveryRequiredKeyFlow.classList.remove('hidden');
+          resetInactivityTimer();
+        })
+        .catch(function (err) {
+          if (err.message !== 'Unauthorized') showVaultError(err.message || 'Failed to set up recovery key.');
+        });
+    });
+  }
+  if (document.getElementById('recovery-required-copy-btn')) {
+    document.getElementById('recovery-required-copy-btn').addEventListener('click', function () {
+      const key = recoveryRequiredKeyDisplay.textContent;
+      if (key) copyPassword(key);
+      resetInactivityTimer();
+    });
+  }
+  if (document.getElementById('recovery-required-saved-btn')) {
+    document.getElementById('recovery-required-saved-btn').addEventListener('click', function () {
+      recoveryRequiredKeyDisplay.textContent = '';
+      recoveryRequiredKeyFlow.classList.add('hidden');
+      recoveryRequiredChoices.classList.remove('hidden');
+      loadRecoveryStatus();
+      resetInactivityTimer();
+    });
+  }
+  if (document.getElementById('recovery-required-questions')) {
+    document.getElementById('recovery-required-questions').addEventListener('click', function () {
+      recoveryRequiredChoices.classList.add('hidden');
+      recoveryRequiredQuestionsFlow.classList.remove('hidden');
+      resetInactivityTimer();
+    });
+  }
+  if (document.getElementById('recovery-questions-setup-form')) {
+    document.getElementById('recovery-questions-setup-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      const payload = {
+        question_1: document.getElementById('req-q1').value.trim(),
+        question_2: document.getElementById('req-q2').value.trim(),
+        question_3: document.getElementById('req-q3').value.trim(),
+        answer_1: document.getElementById('req-a1').value,
+        answer_2: document.getElementById('req-a2').value,
+        answer_3: document.getElementById('req-a3').value,
+      };
+      if (!payload.question_1 || !payload.question_2 || !payload.question_3 || !payload.answer_1 || !payload.answer_2 || !payload.answer_3) {
+        showVaultError('Fill in all three questions and answers.');
+        return;
+      }
+      api('/recovery/setup-questions', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      })
+        .then(function (r) {
+          if (r.status !== 204) return r.json().then(function () { throw new Error('Setup failed'); });
+        })
+        .then(function () {
+          recoveryRequiredQuestionsFlow.classList.add('hidden');
+          recoveryRequiredChoices.classList.remove('hidden');
+          document.getElementById('req-q1').value = '';
+          document.getElementById('req-q2').value = '';
+          document.getElementById('req-q3').value = '';
+          document.getElementById('req-a1').value = '';
+          document.getElementById('req-a2').value = '';
+          document.getElementById('req-a3').value = '';
+          hideRecoveryRequiredOverlay();
+          loadRecoveryStatus();
+          resetInactivityTimer();
+        })
+        .catch(function (err) {
+          if (err.message !== 'Unauthorized') showVaultError(err.message || 'Failed to save recovery questions.');
+        });
+    });
+  }
+
+  // Load side-panel quote once per day (per browser).
+  loadQuoteOfDay();
+
+  // On load: if we have a session, try to use it; else show login/setup and fetch vault status
   if (getSessionId()) {
     api('/folders')
       .then(function (r) {
@@ -573,5 +905,7 @@
       .catch(function () {
         showLogin('');
       });
+  } else {
+    loadLoginScreen();
   }
 })();

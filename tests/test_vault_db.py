@@ -81,7 +81,7 @@ def test_create_entry_returns_id_and_get_entries_decrypts(inited_conn):
         title="Entry Title",
         username="user",
         password="pass",
-        url="https://x.com",
+        url="https://test.example",
         notes="Note",
     )
     assert isinstance(entry_id, int)
@@ -91,7 +91,7 @@ def test_create_entry_returns_id_and_get_entries_decrypts(inited_conn):
     assert entries[0]["title"] == "Entry Title"
     assert entries[0]["username"] == "user"
     assert entries[0]["password"] == "pass"
-    assert entries[0]["url"] == "https://x.com"
+    assert entries[0]["url"] == "https://test.example"
     assert entries[0]["notes"] == "Note"
 
 
@@ -133,7 +133,7 @@ def test_search_entries_returns_matches_with_folder_name(inited_conn):
         username="alice",
         password="p",
         notes="work stuff",
-        url="https://work.com",
+        url="https://test.example",
     )
     results = vault_db.search_entries(conn, key, user_id, "Work")
     assert len(results) == 1
@@ -176,3 +176,21 @@ def test_unlock_with_recovery_key_wrong_key_returns_none(inited_conn):
     wrapped = encrypt(recovery_derived, key)
     vault_db.set_recovery(conn, recovery_salt, wrapped)
     assert vault_db.unlock_with_recovery_key(conn, b"wrong-key") is None
+
+
+def test_set_recovery_questions_and_unlock_with_answers(inited_conn):
+    """After set_recovery_questions, get_recovery_questions returns questions and unlock_with_recovery_answers returns master key."""
+    conn, key, user_id = inited_conn
+    vault_db.set_recovery_questions(
+        conn, key,
+        "Q1?", "Q2?", "Q3?",
+        "ans1", "ans2", "ans3",
+    )
+    q1, q2, q3 = vault_db.get_recovery_questions(conn)
+    assert (q1, q2, q3) == ("Q1?", "Q2?", "Q3?")
+    key_ok, qa_ok = vault_db.get_recovery_methods(conn)
+    assert qa_ok is True
+    unwrapped = vault_db.unlock_with_recovery_answers(conn, "ans1", "ans2", "ans3")
+    assert unwrapped is not None
+    assert unwrapped == key
+    assert vault_db.unlock_with_recovery_answers(conn, "wrong", "wrong", "wrong") is None

@@ -5,11 +5,12 @@ handlers that call vault_db, audit, and session; no business logic in routes.
 
 from __future__ import annotations
 
+import os
 import secrets
 from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -27,9 +28,10 @@ session_store.set_timeout_minutes(config.VAULT_SESSION_TIMEOUT_MINUTES)
 
 
 class UnlockRequest(BaseModel):
-    """Exactly one of password or recovery_key must be set."""
+    """Exactly one of password, recovery_key, or recovery_answers must be set."""
     password: str | None = Field(None, min_length=1)
     recovery_key: str | None = Field(None, min_length=1)
+    recovery_answers: list[str] | None = Field(None, min_length=3, max_length=3)
 
 
 class UnlockResponse(BaseModel):
@@ -73,6 +75,24 @@ class RecoverySetupResponse(BaseModel):
 
 class RecoveryStatusResponse(BaseModel):
     configured: bool
+    key_configured: bool = False
+    questions_configured: bool = False
+    questions: list[str] | None = None  # q1, q2, q3 when questions_configured
+
+
+class RecoverySetupQuestionsRequest(BaseModel):
+    question_1: str = Field(..., min_length=1)
+    question_2: str = Field(..., min_length=1)
+    question_3: str = Field(..., min_length=1)
+    answer_1: str = Field(..., min_length=1)
+    answer_2: str = Field(..., min_length=1)
+    answer_3: str = Field(..., min_length=1)
+
+
+class RecoveryQuestionsPublicResponse(BaseModel):
+    """Returned by unauthenticated GET so unlock page can show question fields."""
+    questions_configured: bool
+    questions: list[str] | None = None  # [q1, q2, q3]
 
 
 class GeneratePasswordQuery(BaseModel):
@@ -85,6 +105,18 @@ class GeneratePasswordQuery(BaseModel):
 
 class GeneratePasswordResponse(BaseModel):
     password: str
+
+
+class VaultStatusResponse(BaseModel):
+    initialized: bool
+
+
+class SetupRequest(BaseModel):
+    password: str = Field(..., min_length=1)
+
+
+class ResetRequest(BaseModel):
+    password: str = Field(..., min_length=1)
 
 
 # --- Helpers ---
@@ -103,29 +135,109 @@ def _require_session(x_vault_session: str | None = Header(None, alias="X-Vault-S
 # --- Routes ---
 
 
+@app.get("/vault/status", response_model=VaultStatusResponse)
+def get_vault_status():
+    """Return whether the vault has been initialized (salt set). No auth required. Used to show setup vs login."""
+    conn = vault_db.open_db(config.VAULT_DB_PATH)
+    try:
+        salt = vault_db.get_salt(conn)
+        return VaultStatusResponse(initialized=salt is not None)
+    finally:
+        conn.close()
+
+
+@app.post("/setup", response_model=UnlockResponse)
+def post_setup(body: SetupRequest):
+    """First-time setup: initialize vault with master password, create first user, return session. Fails if vault already initialized. Audit: vault_setup."""
+    conn = vault_db.open_db(config.VAULT_DB_PATH)
+    try:
+        if vault_db.get_salt(conn) is not None:
+            raise HTTPException(status_code=400, detail="Vault already initialized. Use Unlock to sign in.")
+        salt = vault_db.init_salt(conn)
+        key = derive_key(body.password.encode("utf-8"), salt)
+        vault_db.set_password_check(conn, key)
+        user_id = vault_db.get_or_create_first_user(conn)
+        session_id = session_store.create_session(key, user_id)
+        audit.log_event("vault_setup", resource_id=None, user_id=user_id)
+        return UnlockResponse(session_id=session_id)
+    finally:
+        conn.close()
+
+
+@app.post("/vault/reset")
+def post_vault_reset(body: ResetRequest):
+    """Reset vault: verify password, then delete the database file. Next visit will show first-time setup. For testing only. Audit: vault_reset."""
+    conn = vault_db.open_db(config.VAULT_DB_PATH)
+    try:
+        salt = vault_db.get_salt(conn)
+        if salt is None:
+            raise HTTPException(status_code=400, detail="Vault not initialized. Nothing to reset.")
+        key = derive_key(body.password.encode("utf-8"), salt)
+        user_id = vault_db.get_or_create_first_user(conn)
+        verified = vault_db.verify_password_check(conn, key)
+        if verified is False:
+            raise HTTPException(status_code=401, detail="Wrong password.")
+        if verified is None:
+            try:
+                folders = vault_db.get_folders(conn, key, user_id)
+            except Exception:
+                raise HTTPException(status_code=401, detail="Wrong password.")
+            if not folders:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Cannot verify password for empty vault. Add a folder first or use the password from setup.",
+                )
+        audit.log_event("vault_reset", resource_id=None, user_id=user_id)
+    finally:
+        conn.close()
+    db_path = Path(config.VAULT_DB_PATH)
+    if db_path.is_file():
+        os.remove(db_path)
+    return JSONResponse(status_code=200, content={"message": "Vault reset. You can set up again."})
+
+
+def _unlock_which(body: UnlockRequest) -> str:
+    """Return 'password' | 'recovery_key' | 'recovery_answers' or raise 400."""
+    has_pass = body.password is not None
+    has_key = body.recovery_key is not None
+    has_answers = body.recovery_answers is not None and len(body.recovery_answers) == 3
+    if sum([has_pass, has_key, has_answers]) != 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide exactly one: password, recovery_key, or recovery_answers (3 strings).",
+        )
+    if has_pass:
+        return "password"
+    if has_key:
+        return "recovery_key"
+    return "recovery_answers"
+
+
 @app.post("/unlock", response_model=UnlockResponse)
 def post_unlock(body: UnlockRequest):
-    """Unlock with master password or recovery key. Returns session id. Audit: unlock or unlock_recovery."""
-    if body.password is not None and body.recovery_key is not None:
-        raise HTTPException(status_code=400, detail="Provide either password or recovery_key, not both.")
-    if body.password is None and body.recovery_key is None:
-        raise HTTPException(status_code=400, detail="Provide password or recovery_key.")
+    """Unlock with master password, recovery key, or 3 security-question answers. Returns session id."""
+    which = _unlock_which(body)
 
     conn = vault_db.open_db(config.VAULT_DB_PATH)
     try:
-        if body.recovery_key is not None:
+        if which == "recovery_key":
             key = vault_db.unlock_with_recovery_key(conn, body.recovery_key.strip().encode("utf-8"))
             if key is None:
                 raise HTTPException(status_code=400, detail="Invalid recovery key or recovery not set up.")
+        elif which == "recovery_answers":
+            a1, a2, a3 = body.recovery_answers[0].strip(), body.recovery_answers[1].strip(), body.recovery_answers[2].strip()
+            key = vault_db.unlock_with_recovery_answers(conn, a1, a2, a3)
+            if key is None:
+                raise HTTPException(status_code=400, detail="Invalid answers or recovery questions not set up.")
         else:
             salt = vault_db.get_salt(conn)
             if salt is None:
-                raise HTTPException(status_code=400, detail="Vault not initialized; run Phase 2 demo or init first.")
+                raise HTTPException(status_code=400, detail="Vault not initialized; run setup first.")
             key = derive_key(body.password.encode("utf-8"), salt)
         user_id = vault_db.get_or_create_first_user(conn)
         session_id = session_store.create_session(key, user_id)
         audit.log_event(
-            "unlock_recovery" if body.recovery_key is not None else "unlock",
+            "unlock_recovery_answers" if which == "recovery_answers" else ("unlock_recovery" if which == "recovery_key" else "unlock"),
             resource_id=None,
             user_id=user_id,
         )
@@ -299,12 +411,62 @@ def post_recovery_setup(
 def get_recovery_status(
     x_vault_session: str | None = Header(None, alias="X-Vault-Session"),
 ):
-    """Return whether recovery key is configured (for current vault)."""
+    """Return recovery config: configured, key_configured, questions_configured, and questions if applicable."""
     _require_session(x_vault_session)
     conn = vault_db.open_db(config.VAULT_DB_PATH)
     try:
-        configured = vault_db.get_recovery_configured(conn)
-        return RecoveryStatusResponse(configured=configured)
+        key_ok, qa_ok = vault_db.get_recovery_methods(conn)
+        configured = key_ok or qa_ok
+        questions = None
+        if qa_ok:
+            q1, q2, q3 = vault_db.get_recovery_questions(conn)
+            questions = [q1, q2, q3]
+        return RecoveryStatusResponse(
+            configured=configured,
+            key_configured=key_ok,
+            questions_configured=qa_ok,
+            questions=questions,
+        )
+    finally:
+        conn.close()
+
+
+@app.get("/recovery/questions", response_model=RecoveryQuestionsPublicResponse)
+def get_recovery_questions_public():
+    """Public endpoint so unlock page can show the 3 question fields when questions recovery is set. No auth."""
+    conn = vault_db.open_db(config.VAULT_DB_PATH)
+    try:
+        _, qa_ok = vault_db.get_recovery_methods(conn)
+        questions = None
+        if qa_ok:
+            q1, q2, q3 = vault_db.get_recovery_questions(conn)
+            questions = [q1, q2, q3]
+        return RecoveryQuestionsPublicResponse(questions_configured=qa_ok, questions=questions)
+    finally:
+        conn.close()
+
+
+@app.post("/recovery/setup-questions")
+def post_recovery_setup_questions(
+    body: RecoverySetupQuestionsRequest,
+    x_vault_session: str | None = Header(None, alias="X-Vault-Session"),
+):
+    """Store 3 security questions and wrap master key with key derived from answers. User must be unlocked. Audit: recovery_setup_questions."""
+    key, user_id = _require_session(x_vault_session)
+    conn = vault_db.open_db(config.VAULT_DB_PATH)
+    try:
+        vault_db.set_recovery_questions(
+            conn,
+            key,
+            body.question_1.strip(),
+            body.question_2.strip(),
+            body.question_3.strip(),
+            body.answer_1,
+            body.answer_2,
+            body.answer_3,
+        )
+        audit.log_event("recovery_setup_questions", resource_id=None, user_id=user_id)
+        return Response(status_code=204)
     finally:
         conn.close()
 
@@ -331,8 +493,22 @@ _WEB_DIR = Path(__file__).resolve().parent.parent.parent.parent / "web"
 
 @app.get("/", response_class=FileResponse)
 def get_index():
-    """Serve the single-page vault UI."""
-    return FileResponse(_WEB_DIR / "index.html")
+    """Serve the single-page vault UI. Disable cache so updates to HTML/CSS are visible."""
+    response = FileResponse(_WEB_DIR / "index.html")
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
 
-app.mount("/static", StaticFiles(directory=str(_WEB_DIR)), name="static")
+class NoCacheStaticFiles(StaticFiles):
+    """Serve static files with no-cache so JS/CSS updates are visible during development."""
+
+    def get_response(self, path: str, scope):
+        response = super().get_response(path, scope)
+        if hasattr(response, "headers"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+        return response
+
+
+app.mount("/static", NoCacheStaticFiles(directory=str(_WEB_DIR)), name="static")

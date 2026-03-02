@@ -105,17 +105,65 @@ def init_salt(conn: sqlite3.Connection) -> bytes:
     return salt
 
 
+def set_password_check(conn: sqlite3.Connection, key: bytes) -> None:
+    """Store an encrypted blob so we can verify the master password later (e.g. on reset). Call after init_salt."""
+    blob = encrypt(key, b"ok")
+    conn.execute(
+        "UPDATE vault_meta SET password_check_encrypted = ? WHERE id = 1",
+        (blob,),
+    )
+    conn.commit()
+
+
+def verify_password_check(conn: sqlite3.Connection, key: bytes) -> bool | None:
+    """Return True if key is correct, False if wrong, None if no check blob (pre-migration vault)."""
+    row = conn.execute(
+        "SELECT password_check_encrypted FROM vault_meta WHERE id = 1"
+    ).fetchone()
+    if not row or row[0] is None:
+        return None
+    try:
+        return decrypt(key, bytes(row[0])) == b"ok"
+    except InvalidTag:
+        return False
+
+
 # --- Recovery key (unlock when master password is forgotten) ---
 
 
 def get_recovery_configured(conn: sqlite3.Connection) -> bool:
-    """True if recovery key has been set (recovery_salt and wrapped_master_key are not null)."""
+    """True if any recovery method is set (key and/or questions)."""
     row = conn.execute(
-        "SELECT recovery_salt, wrapped_master_key FROM vault_meta WHERE id = 1"
+        """SELECT recovery_salt, wrapped_master_key, recovery_qa_salt, recovery_qa_wrapped
+           FROM vault_meta WHERE id = 1"""
     ).fetchone()
-    if not row or row[0] is None or row[1] is None:
+    if not row:
         return False
-    return True
+    key_ok = row[0] is not None and row[1] is not None
+    qa_ok = row[2] is not None and row[3] is not None
+    return key_ok or qa_ok
+
+
+def get_recovery_methods(conn: sqlite3.Connection) -> tuple[bool, bool]:
+    """Return (key_configured, questions_configured)."""
+    row = conn.execute(
+        "SELECT recovery_salt, wrapped_master_key, recovery_qa_salt, recovery_qa_wrapped FROM vault_meta WHERE id = 1"
+    ).fetchone()
+    if not row:
+        return (False, False)
+    key_ok = row[0] is not None and row[1] is not None
+    qa_ok = row[2] is not None and row[3] is not None
+    return (key_ok, qa_ok)
+
+
+def get_recovery_questions(conn: sqlite3.Connection) -> tuple[str | None, str | None, str | None]:
+    """Return (q1, q2, q3) if questions recovery is set; else (None, None, None). No auth; used on unlock page."""
+    row = conn.execute(
+        "SELECT recovery_question_1, recovery_question_2, recovery_question_3 FROM vault_meta WHERE id = 1"
+    ).fetchone()
+    if not row or row[0] is None:
+        return (None, None, None)
+    return (str(row[0]), str(row[1]), str(row[2]))
 
 
 def set_recovery(
@@ -155,6 +203,60 @@ def unlock_with_recovery_key(
         recovery_derived = derive_key(recovery_key_bytes, recovery_salt)
         master_key = decrypt(recovery_derived, wrapped)
         return master_key
+    except InvalidTag:
+        return None
+
+
+# Delimiter for combining 3 answers into one key material (must not appear in normal answers).
+_QA_DELIM = "\x00"
+
+
+def set_recovery_questions(
+    conn: sqlite3.Connection,
+    master_key: bytes,
+    question_1: str,
+    question_2: str,
+    question_3: str,
+    answer_1: str,
+    answer_2: str,
+    answer_3: str,
+) -> None:
+    """Store 3 questions (plaintext) and master key wrapped with key derived from the 3 answers."""
+    qa_salt = random_bytes(ARGON2_SALT_LEN)
+    key_material = (answer_1 + _QA_DELIM + answer_2 + _QA_DELIM + answer_3).encode("utf-8")
+    derived = derive_key(key_material, qa_salt)
+    wrapped = encrypt(derived, master_key)
+    conn.execute(
+        """UPDATE vault_meta SET
+           recovery_qa_salt = ?, recovery_qa_wrapped = ?,
+           recovery_question_1 = ?, recovery_question_2 = ?, recovery_question_3 = ?
+           WHERE id = 1""",
+        (qa_salt, wrapped, question_1.strip(), question_2.strip(), question_3.strip()),
+    )
+    conn.commit()
+
+
+def get_qa_recovery_material(conn: sqlite3.Connection) -> tuple[bytes | None, bytes | None]:
+    """Return (recovery_qa_salt, recovery_qa_wrapped) or (None, None)."""
+    row = conn.execute(
+        "SELECT recovery_qa_salt, recovery_qa_wrapped FROM vault_meta WHERE id = 1"
+    ).fetchone()
+    if not row or row[0] is None or row[1] is None:
+        return (None, None)
+    return (bytes(row[0]), bytes(row[1]))
+
+
+def unlock_with_recovery_answers(
+    conn: sqlite3.Connection, answer_1: str, answer_2: str, answer_3: str
+) -> bytes | None:
+    """Derive key from 3 answers and unwrap master key. Returns master_key or None if wrong."""
+    qa_salt, wrapped = get_qa_recovery_material(conn)
+    if qa_salt is None or wrapped is None:
+        return None
+    try:
+        key_material = (answer_1 + _QA_DELIM + answer_2 + _QA_DELIM + answer_3).encode("utf-8")
+        derived = derive_key(key_material, qa_salt)
+        return decrypt(derived, wrapped)
     except InvalidTag:
         return None
 

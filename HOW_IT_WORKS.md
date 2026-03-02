@@ -6,12 +6,13 @@ This guide gives **plain-language, step-by-step instructions** for running and u
 
 ## What’s included (as of this version)
 
+- **First-time setup** — When you open the app and no vault exists yet, you see a **Create your vault** form: choose a master password (and confirm it), then click **Create vault**. You are then logged in. No command line required.
 - **Unlock / lock** — You type one master password to open the vault; the app remembers you’re logged in until you click Lock or leave it idle for 15 minutes.
 - **Folders** — You can see a list of folders (like "Personal"). Each folder holds a list of saved logins.
 - **Entries** — Each entry is one saved login: a title, username, password, optional website URL, and optional notes. You can view them and copy the password. The app clears the password from your clipboard 30 seconds after you copy it.
 - **Add entry** — You can create a new saved login: type in the details and click Save. There is a **Generate** button that creates a random password for you.
 - **Audit log** — The app writes a log file of actions (like "user unlocked" or "user created an entry") for your records. Passwords are never written to this log.
-- **Recovery key** — You can set up a one-time recovery key. If you forget your master password, you can unlock the vault by pasting the recovery key instead. The key is shown only once when you set it up; you must save it somewhere safe offline.
+- **Recovery (required after first login)** — Right after you create the vault or log in for the first time, the app asks you to set up recovery. You must choose one: **recovery key** (a long one-time key to save offline) or **3 security questions** (three questions and answers you’ll remember). If you forget your master password later, you can unlock using either the recovery key or by answering the three questions.
 - **Create folder** — You can create new folders from the web page.
 - **Edit and delete entry** — You can edit or delete a saved login from its detail view.
 - **Search** — You can search entries by title, username, URL, or notes.
@@ -79,19 +80,28 @@ You have now started the application. Use the sections below to log in and use t
 
 ## First-time setup: create the vault and a master password
 
-Do this **only once**, when you have never run the vault before and do **not** yet have a file named `demo_vault.db` in your project folder.
+Do this **only once**, when you have never created a vault on this device (no existing vault database).
+
+**Option A — In the browser (recommended):**
+
+1. Start the server (see "How to run the application", Steps 1–3) and open **http://127.0.0.1:8001/** in your browser.
+2. If the vault has not been set up yet, you will see **"First time here?"** with a short explanation and two fields: **Choose master password** and **Confirm master password**.
+3. Enter a **master password** in both fields (they must match). Choose something strong; you will use this every time you unlock the vault.
+4. Click **Create vault**.
+5. **You should see:** The vault opens and a **“Set up recovery (required)”** screen appears. You must choose one option before you can use the vault:
+   - **Use recovery key** — The app shows a long one-time key. Copy or print it and store it somewhere safe. You will not see it again. If you forget your master password, you can unlock by pasting this key.
+   - **Use 3 security questions** — Enter three questions (e.g. “What was your first pet’s name?”) and the answers. Choose questions only you know; avoid answers that others could guess or find online. If you forget your master password, you can unlock by answering these three questions.
+6. After you complete one of these, the recovery screen closes and you can create folders, add entries, and use the vault. **Remember your master password**—you need it to unlock next time (unless you use the recovery key or security questions).
+
+**Option B — Using the command-line script:**
 
 1. Open the terminal and go to the project folder (see **Step 1** under "How to run the application").
 2. Activate the virtual environment (see **Step 2**).
-3. Type this and press **Enter**:
-   ```text
-   python scripts/phase2_demo.py
-   ```
-4. **You should see:** A prompt that says **"Master password:"**. The cursor will wait there; nothing will appear as you type (this is normal for passwords).
-5. Type a **master password** that you will remember. For example you might use `phase2pass` for testing, or a strong password for real use. Then press **Enter**.
-6. **You should see:** Messages like "New vault: stored salt." and "Created user 1, folder 1, entry 1." and "Phase 2 demo OK." That means the vault was created. A file named `demo_vault.db` was created in your project folder.
-7. **Remember this password.** You will use it every time you open the vault in the browser. There is no "forgot password" link yet; if you lose it, you cannot open this vault without a recovery key (not yet implemented).
-8. After this, you can start the server (Steps 3 and 4 under "How to run the application") and use that same password to unlock in the browser. The demo also created one folder called **Personal** and one sample entry called **Test login** so you can see how the vault looks.
+3. Run: `VAULT_DB_PATH=demo_vault.db python scripts/phase2_demo.py`
+4. When prompted, type a master password and press **Enter**. The script creates the vault and a sample folder and entry.
+5. Start the server and open the app in the browser; use that same password to unlock.
+
+**Reset vault (for testing only):** If you created a test vault (e.g. with password "test") and want to start over, click **Reset vault (for testing)** below the Lock button, enter your master password when prompted, and confirm. The vault will be deleted and the next time you open the app you will see the first-time setup form again.
 
 ---
 
@@ -108,14 +118,18 @@ Do this **only once**, when you have never run the vault before and do **not** y
    - An **Add entry** button
    This is your **vault view**—you are now logged in.
 6. **If the password is wrong:** You will stay on the same page and may see an error message. Check that you typed the correct master password and try again. If you never ran the first-time setup, do that first (see the section above).
-7. **Unlock with recovery key (if you forgot your password):** If you have already set up a recovery key (see below), you can click **"Unlock with recovery key"** on the login page. A large text box will appear. Paste the recovery key you saved when you set it up, then click **Unlock**. If the key is correct, you will be logged in. You can click **"Back to password"** to return to the normal password box.
+7. **If you forgot your password:** You can unlock using **recovery** (if you set it up):
+   - **Recovery key:** Click **"Forgot your password? Use your recovery key instead."** A text box will appear. Paste the long recovery key you saved when you set it up, then click **Unlock with recovery key**. You can click **"Back to password"** to return to the password box.
+   - **3 security questions:** Click **"Or unlock with 3 security questions."** The app will show the three questions you chose. Type your three answers (they are case-sensitive), then click **Unlock with answers**. You can click **Back** to return to the recovery key or password options.
 
 ---
 
-## Recovery key: set up and use
+## Recovery: set up and use
 
-- **Set up (one time):** After you have unlocked the vault with your master password, look for the **"Set up recovery key"** button near the top (below the Lock button). Click it. The app will show you a long recovery key **once**. Copy it (use the **Copy** button) and store it somewhere safe offline—for example, write it on paper and keep it in a safe place, or save it in a secure file that is not on this computer. Then click **"I've saved it"**. The key will disappear from the screen. You will not see it again. If you forget your master password later, you can use this recovery key to unlock the vault (see step 7 under "Unlock" above).
-- **Already set:** If you have already set up a recovery key, the button will not appear; instead you will see **"Recovery key is set."**
+- **Mandatory after first login:** Right after you create the vault or the first time you unlock, the app shows a **"Set up recovery (required)"** screen. You must choose one option before you can use the vault: **Use recovery key** (long key to save offline) or **Use 3 security questions** (three questions and answers you’ll remember). You cannot skip this step.
+- **Recovery key option:** If you choose **Use recovery key**, the app shows a long key **once**. Copy it and store it somewhere safe offline, then click **"I've saved it"**. You can use this key later to unlock if you forget your master password (see step 7 under "Unlock" above).
+- **3 security questions option:** If you choose **Use 3 security questions**, type three questions (e.g. “What was your first pet’s name?”) and the answers. Pick questions only you know; avoid answers that others could guess or find online. Click **Save recovery questions**. You can unlock later by answering these three questions (see step 7 under "Unlock" above).
+- **Already set:** If you have already set up recovery (key or questions), the **"Set up recovery key"** button appears only when you have not set recovery yet. Once recovery is set, you will see **"Recovery is set (key or questions)."**
 
 ---
 
@@ -187,4 +201,4 @@ You can type that as one long line in the terminal (after activating the virtual
 
 For a **line-by-line and block-by-block explanation** of the code (what each part does, where it connects, and which standards and algorithms we use), see **[EDUCATIONAL_CODE_WALKTHROUGH.md](EDUCATIONAL_CODE_WALKTHROUGH.md)**. That document is updated whenever we add or change code.
 
-*Last updated: after adding recovery key, create folder, edit/delete entry, and search.*
+*Last updated: after adding mandatory recovery setup (key or 3 security questions) and unlock by questions.*
