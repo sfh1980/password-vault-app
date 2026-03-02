@@ -904,4 +904,4 @@ function api(url, options = {}) {
 
 ---
 
-*This walkthrough was written after Phases 1–4 (crypto, DB, API, web UI). When we add recovery key, create folder, edit/delete, search, or other features, add the new code to the right file section above and update this cross-reference table and HOW_IT_WORKS.md.*
+*This walkthrough was written after Phases 1–4 (crypto, DB, API, web UI). When we add recovery key, create folder, edit/delete, search, or other features, add the new code to the right file section above and update this cross-reference table and USER_GUIDE.md.*

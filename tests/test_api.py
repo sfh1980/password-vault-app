@@ -7,7 +7,24 @@ from __future__ import annotations
 
 import pytest
 
-from conftest import TEST_MASTER_PASSWORD
+from conftest import TEST_MASTER_PASSWORD, TEST_USERNAME
+
+
+# --- Health and readiness ---
+
+
+def test_health_returns_200(client):
+    """GET /health returns 200 and status ok."""
+    r = client.get("/health")
+    assert r.status_code == 200
+    assert r.json().get("status") == "ok"
+
+
+def test_ready_returns_200_when_db_ok(client):
+    """GET /ready returns 200 when DB is reachable."""
+    r = client.get("/ready")
+    assert r.status_code == 200
+    assert r.json().get("status") == "ready"
 
 
 # --- Vault status, setup, reset ---
@@ -37,7 +54,7 @@ def test_setup_creates_vault_and_returns_session(client, monkeypatch, tmp_path):
     fresh_db = tmp_path / "setup_test.db"
     fresh_db.touch()
     monkeypatch.setattr(config, "VAULT_DB_PATH", str(fresh_db))
-    r = client.post("/setup", json={"password": "new-master"})
+    r = client.post("/setup", json={"username": "firstuser", "password": "new-master"})
     assert r.status_code == 200
     data = r.json()
     assert "session_id" in data
@@ -48,34 +65,34 @@ def test_setup_creates_vault_and_returns_session(client, monkeypatch, tmp_path):
 
 
 def test_setup_when_already_initialized_returns_400(initialized_vault):
-    """POST /setup when vault already has salt returns 400."""
-    r = initialized_vault.post("/setup", json={"password": "any"})
+    """POST /setup when vault already has a user returns 400."""
+    r = initialized_vault.post("/setup", json={"username": "other", "password": "any"})
     assert r.status_code == 400
     assert "already" in r.json().get("detail", "").lower()
 
 
 def test_vault_reset_wrong_password_returns_401(client, monkeypatch, tmp_path):
-    """POST /vault/reset with wrong password returns 401 (vault created via setup has password check)."""
+    """POST /vault/reset with wrong password returns 401."""
     from vault import config
     fresh_db = tmp_path / "reset_wrong.db"
     fresh_db.touch()
     monkeypatch.setattr(config, "VAULT_DB_PATH", str(fresh_db))
-    r_setup = client.post("/setup", json={"password": "correct-pass"})
+    r_setup = client.post("/setup", json={"username": "u", "password": "correct-pass"})
     assert r_setup.status_code == 200
-    r = client.post("/vault/reset", json={"password": "wrong-password"})
+    r = client.post("/vault/reset", json={"username": "u", "password": "wrong-password"})
     assert r.status_code == 401
-    assert "password" in r.json().get("detail", "").lower()
+    assert "password" in r.json().get("detail", "").lower() or "username" in r.json().get("detail", "").lower()
 
 
 def test_vault_reset_success_then_status_false(client, monkeypatch, tmp_path):
-    """POST /vault/reset with correct password returns 200; then GET /vault/status returns initialized false."""
+    """POST /vault/reset with correct username+password returns 200; then status is false."""
     from vault import config
     fresh_db = tmp_path / "reset_ok.db"
     fresh_db.touch()
     monkeypatch.setattr(config, "VAULT_DB_PATH", str(fresh_db))
-    r_setup = client.post("/setup", json={"password": "reset-me"})
+    r_setup = client.post("/setup", json={"username": "u", "password": "reset-me"})
     assert r_setup.status_code == 200
-    r = client.post("/vault/reset", json={"password": "reset-me"})
+    r = client.post("/vault/reset", json={"username": "u", "password": "reset-me"})
     assert r.status_code == 200
     assert "message" in r.json()
     r2 = client.get("/vault/status")
@@ -87,30 +104,34 @@ def test_vault_reset_success_then_status_false(client, monkeypatch, tmp_path):
 
 
 def test_unlock_requires_password_or_recovery_key(client):
-    """POST /unlock with neither password nor recovery_key returns 400."""
-    r = client.post("/unlock", json={})
+    """POST /unlock with username but neither password nor recovery_key nor recovery_answers returns 400."""
+    # Vault may not be initialized; 422 if username missing, 400 if wrong/missing credential
+    r = client.post("/unlock", json={"username": "someone"})
     assert r.status_code == 400
-    assert "password" in r.json().get("detail", "").lower() or "recovery" in r.json().get("detail", "").lower()
+    detail = (r.json().get("detail") or "").lower()
+    assert "one" in detail or "password" in detail or "recovery" in detail
 
 
 def test_unlock_vault_not_initialized_returns_400(client, monkeypatch, tmp_path):
-    """POST /unlock when DB has no salt (vault not inited) returns 400."""
+    """POST /unlock when vault has no users returns 400."""
     from vault import config
     test_db = tmp_path / "no_salt.db"
     test_db.touch()
     monkeypatch.setattr(config, "VAULT_DB_PATH", test_db)
-    # Open DB so migrations run but do not init salt
     from vault import vault_db
     conn = vault_db.open_db(test_db)
     conn.close()
-    r = client.post("/unlock", json={"password": "any"})
+    r = client.post("/unlock", json={"username": "any", "password": "any"})
     assert r.status_code == 400
     assert "not initialized" in r.json().get("detail", "").lower()
 
 
 def test_unlock_success_returns_session_id(initialized_vault):
-    """POST /unlock with correct password returns 200 and session_id; no password in response."""
-    r = initialized_vault.post("/unlock", json={"password": TEST_MASTER_PASSWORD})
+    """POST /unlock with correct username+password returns 200 and session_id."""
+    r = initialized_vault.post(
+        "/unlock",
+        json={"username": TEST_USERNAME, "password": TEST_MASTER_PASSWORD},
+    )
     assert r.status_code == 200
     data = r.json()
     assert "session_id" in data
@@ -123,7 +144,7 @@ def test_unlock_with_both_password_and_recovery_returns_400(initialized_vault):
     """POST /unlock with both password and recovery_key returns 400."""
     r = initialized_vault.post(
         "/unlock",
-        json={"password": "x", "recovery_key": "y"},
+        json={"username": "x", "password": "x", "recovery_key": "y"},
     )
     assert r.status_code == 400
     detail = r.json().get("detail", "").lower()
@@ -131,13 +152,16 @@ def test_unlock_with_both_password_and_recovery_returns_400(initialized_vault):
 
 
 def test_unlock_with_recovery_key_success(initialized_vault, session_headers, client):
-    """Set up recovery, lock, then unlock with recovery_key; get 200 and session_id."""
+    """Set up recovery, lock, then unlock with username+recovery_key; get 200 and session_id."""
     r_setup = client.post("/recovery/setup", headers=session_headers)
     assert r_setup.status_code == 200
     recovery_key = r_setup.json()["recovery_key"]
     assert isinstance(recovery_key, str) and len(recovery_key) > 0
     client.post("/lock", headers=session_headers)
-    r_unlock = client.post("/unlock", json={"recovery_key": recovery_key})
+    r_unlock = client.post(
+        "/unlock",
+        json={"username": TEST_USERNAME, "recovery_key": recovery_key},
+    )
     assert r_unlock.status_code == 200
     data = r_unlock.json()
     assert "session_id" in data
@@ -146,7 +170,10 @@ def test_unlock_with_recovery_key_success(initialized_vault, session_headers, cl
 
 def test_unlock_with_recovery_key_invalid_returns_400(initialized_vault, client):
     """POST /unlock with wrong recovery key returns 400 (or recovery not set)."""
-    r = client.post("/unlock", json={"recovery_key": "wrong-key-never-set"})
+    r = client.post(
+        "/unlock",
+        json={"username": TEST_USERNAME, "recovery_key": "wrong-key-never-set"},
+    )
     assert r.status_code == 400
     assert "recovery" in r.json().get("detail", "").lower() or "invalid" in r.json().get("detail", "").lower()
 
@@ -197,14 +224,14 @@ def test_recovery_status_requires_session(initialized_vault, client):
 
 
 def test_recovery_questions_public_returns_questions_configured(initialized_vault, client, session_headers):
-    """GET /recovery/questions is public; returns questions_configured and questions when set."""
-    r = client.get("/recovery/questions")
+    """GET /recovery/questions?username= is public; returns questions_configured and questions when set."""
+    r = client.get("/recovery/questions?username=" + TEST_USERNAME)
     assert r.status_code == 200
     data = r.json()
     assert "questions_configured" in data
     assert data["questions_configured"] is False
     assert data.get("questions") is None
-    # Set up questions recovery
+    # Set up questions recovery for testuser
     client.post(
         "/recovery/setup-questions",
         headers=session_headers,
@@ -217,7 +244,7 @@ def test_recovery_questions_public_returns_questions_configured(initialized_vaul
             "answer_3": "A3",
         },
     )
-    r2 = client.get("/recovery/questions")
+    r2 = client.get("/recovery/questions?username=" + TEST_USERNAME)
     assert r2.status_code == 200
     d2 = r2.json()
     assert d2["questions_configured"] is True
@@ -241,7 +268,7 @@ def test_recovery_setup_questions_requires_session(initialized_vault, client):
 
 
 def test_unlock_with_recovery_answers_success(initialized_vault, client, session_headers):
-    """Set up questions recovery, then unlock with recovery_answers; get 200 and session_id."""
+    """Set up questions recovery for testuser, then unlock with username+recovery_answers; get 200 and session_id."""
     client.post(
         "/recovery/setup-questions",
         headers=session_headers,
@@ -254,9 +281,10 @@ def test_unlock_with_recovery_answers_success(initialized_vault, client, session
             "answer_3": "three",
         },
     )
+    client.post("/lock", headers=session_headers)
     r = client.post(
         "/unlock",
-        json={"recovery_answers": ["one", "two", "three"]},
+        json={"username": TEST_USERNAME, "recovery_answers": ["one", "two", "three"]},
     )
     assert r.status_code == 200
     assert "session_id" in r.json()
@@ -278,9 +306,33 @@ def test_unlock_with_recovery_answers_wrong_returns_400(initialized_vault, clien
     )
     r = client.post(
         "/unlock",
-        json={"recovery_answers": ["wrong", "wrong", "wrong"]},
+        json={"username": TEST_USERNAME, "recovery_answers": ["wrong", "wrong", "wrong"]},
     )
     assert r.status_code == 400
+
+
+def test_signup_creates_user_and_returns_session(initialized_vault, client):
+    """POST /signup when vault is initialized creates a new user and returns session_id."""
+    r = client.post("/signup", json={"username": "seconduser", "password": "second-pass"})
+    assert r.status_code == 200
+    data = r.json()
+    assert "session_id" in data
+    assert isinstance(data["session_id"], str)
+    # New user can unlock with their own credentials
+    r2 = client.post("/unlock", json={"username": "seconduser", "password": "second-pass"})
+    assert r2.status_code == 200
+    assert "session_id" in r2.json()
+
+
+def test_signup_when_not_initialized_returns_400(client, monkeypatch, tmp_path):
+    """POST /signup when vault has no users returns 400."""
+    from vault import config
+    fresh_db = tmp_path / "nosignup.db"
+    fresh_db.touch()
+    monkeypatch.setattr(config, "VAULT_DB_PATH", str(fresh_db))
+    r = client.post("/signup", json={"username": "u", "password": "p"})
+    assert r.status_code == 400
+    assert "not initialized" in r.json().get("detail", "").lower()
 
 
 # --- Folders ---

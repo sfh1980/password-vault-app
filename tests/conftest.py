@@ -14,13 +14,16 @@ import pytest
 _test_dir = tempfile.mkdtemp(prefix="vault_test_")
 os.environ["VAULT_DB_PATH"] = os.path.join(_test_dir, "vault.db")
 os.environ["VAULT_AUDIT_LOG_PATH"] = os.path.join(_test_dir, "audit.log")
+# High rate limit in tests so many auth requests (setup/unlock/signup) don't trigger 429.
+os.environ["VAULT_RATE_LIMIT_AUTH_PER_MINUTE"] = "1000"
 
 from fastapi.testclient import TestClient
 
 from vault import config, vault_db
 from vault.api.main import app
 
-# Password used in tests for unlock. Vault is inited with random salt in initialized_vault.
+# Username and password used in tests. initialized_vault creates first user with these.
+TEST_USERNAME = "testuser"
 TEST_MASTER_PASSWORD = "test-master-password"
 
 
@@ -32,12 +35,11 @@ def client() -> TestClient:
 
 @pytest.fixture
 def initialized_vault(client: TestClient) -> TestClient:
-    """Ensure the test DB has salt and at least one user so POST /unlock can succeed."""
+    """Ensure the test DB has at least one user so POST /unlock can succeed."""
     conn = vault_db.open_db(config.VAULT_DB_PATH)
     try:
-        if vault_db.get_salt(conn) is None:
-            vault_db.init_salt(conn)
-        vault_db.get_or_create_first_user(conn)
+        if not vault_db.vault_initialized(conn):
+            vault_db.init_first_user(conn, TEST_USERNAME, TEST_MASTER_PASSWORD)
     finally:
         conn.close()
     return client
@@ -48,7 +50,7 @@ def session_headers(initialized_vault: TestClient) -> dict[str, str]:
     """Unlock once and return headers with X-Vault-Session for authenticated requests."""
     r = initialized_vault.post(
         "/unlock",
-        json={"password": TEST_MASTER_PASSWORD},
+        json={"username": TEST_USERNAME, "password": TEST_MASTER_PASSWORD},
     )
     assert r.status_code == 200, r.text
     data = r.json()

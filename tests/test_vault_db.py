@@ -17,7 +17,8 @@ os.environ["VAULT_DB_PATH"] = os.path.join(_test_dir, "vault.db")
 from vault import vault_db
 from vault.crypto import derive_key, encrypt, random_bytes
 
-# Use a fixed password for key derivation in tests; salt comes from inited DB.
+# Use a fixed password for key derivation in tests; inited_conn creates first user with this.
+TEST_USERNAME = "testuser"
 TEST_PASSWORD = b"test-db-password"
 
 
@@ -34,15 +35,13 @@ def conn():
 
 @pytest.fixture
 def inited_conn(conn):
-    """DB with salt and one user; yields (conn, key, user_id)."""
-    if vault_db.get_salt(conn) is None:
-        salt = vault_db.init_salt(conn)
-    else:
-        row = conn.execute("SELECT salt FROM vault_meta WHERE id = 1").fetchone()
-        salt = bytes(row[0])
-    key = derive_key(TEST_PASSWORD, salt)
-    user_id = vault_db.get_or_create_first_user(conn)
-    return conn, key, user_id
+    """DB with one user (testuser); yields (conn, key, user_id)."""
+    if not vault_db.vault_initialized(conn):
+        vault_db.init_first_user(conn, TEST_USERNAME, TEST_PASSWORD.decode("utf-8"))
+    user = vault_db.get_user_by_username(conn, TEST_USERNAME)
+    assert user is not None
+    key = derive_key(TEST_PASSWORD, bytes(user["salt"]))
+    return conn, key, user["id"]
 
 
 def test_migrations_run_and_schema_version_set(conn):
@@ -145,26 +144,28 @@ def test_search_entries_returns_matches_with_folder_name(inited_conn):
 
 
 def test_recovery_configured_false_until_set_recovery(inited_conn):
-    """get_recovery_configured is False until set_recovery is called."""
+    """get_recovery_configured(user_id) is False until set_recovery is called."""
     conn, key, user_id = inited_conn
-    assert vault_db.get_recovery_configured(conn) is False
+    assert vault_db.get_recovery_configured(conn, user_id) is False
     recovery_salt = random_bytes(16)
     recovery_derived = derive_key(b"my-recovery-key", recovery_salt)
     wrapped = encrypt(recovery_derived, key)
-    vault_db.set_recovery(conn, recovery_salt, wrapped)
-    assert vault_db.get_recovery_configured(conn) is True
+    vault_db.set_recovery(conn, user_id, recovery_salt, wrapped)
+    assert vault_db.get_recovery_configured(conn, user_id) is True
 
 
 def test_unlock_with_recovery_key_returns_master_key(inited_conn):
-    """After set_recovery, unlock_with_recovery_key returns the same master key."""
+    """After set_recovery, unlock_with_recovery_key(username, key) returns (user_id, master_key)."""
     conn, key, user_id = inited_conn
     recovery_key_bytes = b"test-recovery-key-123"
     recovery_salt = random_bytes(16)
     recovery_derived = derive_key(recovery_key_bytes, recovery_salt)
     wrapped = encrypt(recovery_derived, key)
-    vault_db.set_recovery(conn, recovery_salt, wrapped)
-    unwrapped = vault_db.unlock_with_recovery_key(conn, recovery_key_bytes)
-    assert unwrapped is not None
+    vault_db.set_recovery(conn, user_id, recovery_salt, wrapped)
+    out = vault_db.unlock_with_recovery_key(conn, TEST_USERNAME, recovery_key_bytes)
+    assert out is not None
+    uid, unwrapped = out
+    assert uid == user_id
     assert unwrapped == key
 
 
@@ -174,23 +175,25 @@ def test_unlock_with_recovery_key_wrong_key_returns_none(inited_conn):
     recovery_salt = random_bytes(16)
     recovery_derived = derive_key(b"correct-key", recovery_salt)
     wrapped = encrypt(recovery_derived, key)
-    vault_db.set_recovery(conn, recovery_salt, wrapped)
-    assert vault_db.unlock_with_recovery_key(conn, b"wrong-key") is None
+    vault_db.set_recovery(conn, user_id, recovery_salt, wrapped)
+    assert vault_db.unlock_with_recovery_key(conn, TEST_USERNAME, b"wrong-key") is None
 
 
 def test_set_recovery_questions_and_unlock_with_answers(inited_conn):
-    """After set_recovery_questions, get_recovery_questions returns questions and unlock_with_recovery_answers returns master key."""
+    """After set_recovery_questions, get_recovery_questions(user_id) and unlock_with_recovery_answers(username, ...) work."""
     conn, key, user_id = inited_conn
     vault_db.set_recovery_questions(
-        conn, key,
+        conn, user_id, key,
         "Q1?", "Q2?", "Q3?",
         "ans1", "ans2", "ans3",
     )
-    q1, q2, q3 = vault_db.get_recovery_questions(conn)
+    q1, q2, q3 = vault_db.get_recovery_questions(conn, user_id)
     assert (q1, q2, q3) == ("Q1?", "Q2?", "Q3?")
-    key_ok, qa_ok = vault_db.get_recovery_methods(conn)
+    key_ok, qa_ok = vault_db.get_recovery_methods(conn, user_id)
     assert qa_ok is True
-    unwrapped = vault_db.unlock_with_recovery_answers(conn, "ans1", "ans2", "ans3")
-    assert unwrapped is not None
+    out = vault_db.unlock_with_recovery_answers(conn, TEST_USERNAME, "ans1", "ans2", "ans3")
+    assert out is not None
+    uid, unwrapped = out
+    assert uid == user_id
     assert unwrapped == key
-    assert vault_db.unlock_with_recovery_answers(conn, "wrong", "wrong", "wrong") is None
+    assert vault_db.unlock_with_recovery_answers(conn, TEST_USERNAME, "wrong", "wrong", "wrong") is None

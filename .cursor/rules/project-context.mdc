@@ -11,17 +11,20 @@ Before answering any question or responding to any comment, recall these facts:
 - **Homelab:** Runs on an **Ubuntu OS laptop** (not a separate server or desktop). Laptop is always on barring power issues.
 - **On laptop:** Docker and Docker Compose installed on the host. **Nginx** runs as a **Docker container** (reverse proxy), not installed on the host.
 - **Backup/NAS:** Dell Optiplex 7050 SFF running **TrueNAS Scale** at **http://192.168.1.136/ui/signin** — used for vault backups (daily encrypted, rolling 30 days). Backup from vault app will target this host (e.g. SMB/NFS/rclone to be chosen).
-- **Domain:** whoissean.dev (Porkbun); vault will be at vault.whoissean.dev.
-- **Deploy target:** Docker on that Ubuntu laptop; Nginx for HTTPS. Use **ports 80/443** for now; OPNsense box planned later on the home network.
+- **Domain:** whoissean.dev (Porkbun); not used for the vault for now (vault is not published).
+- **Deploy target:** Docker on that Ubuntu laptop only. Vault is **not** exposed to the internet; access is local (127.0.0.1:8050) or, when VPN (e.g. WireGuard) is set up, via VPN only. OPNsense box planned later on the home network.
 - **Python:** Use the most current stable version (in Docker and when developing).
 - **Development:** This repo is developed either on the laptop or in a separate Docker container.
-- **Existing services (same Nginx):** nginx, cAdvisor, Dozzle, Portainer, dnsmasq, Jellyfin — add vault.whoissean.dev as another vhost without conflicting.
-- **Ports:** Vault API uses **host port 8001** (Portainer uses 8000). In Docker: publish `127.0.0.1:8001:8000`; Nginx proxy_pass to `127.0.0.1:8001`.
+- **Existing services:** nginx, cAdvisor, Dozzle, Portainer, dnsmasq, Jellyfin; vault runs alongside them but is not added as a public Nginx vhost.
+- **Ports:** Vault uses **host port 8050** in Docker (avoids 8000 Portainer, 8080 sabnzbd, etc.). Publish `127.0.0.1:8050:8000` so only the host can reach it; when using VPN, user may switch to `8050:8000` so VPN clients can reach the vault via the laptop's LAN IP.
 
 ## Project
 - Family password vault for ~2 people; shared/family use; tens to hundreds of entries, scalable.
-- Design and phases are in DESIGN_AND_EDUCATION.md; requirements answers in PASSWORD_VAULT_QUESTIONS.md.
+- Design and requirements are in DESIGN.md; full doc index in DOCS.md.
 - Phases 1–4 done (crypto, DB, API + audit, web UI); next is Phase 5 (Docker, backup, recovery key).
+
+## Workflow (mandatory)
+- **All feature work and refactors** must follow the documented agent workflow and handoff process. See `.cursor/rules/agent-workflow-required.mdc` and `.cursor/rules/orchestration.mdc`. Use planner → developer → tester trios per domain; write handoffs to `docs/handoffs/`; ask "Proceed?" before each trio; run integration-reviewer for cross-domain work. Do not implement by coding directly in a single pass.
 
 ## Development approach — production + educational
 - **Dual purpose:** Both the password vault and the homelab are **production** (everything built will be used) and **educational**. Development is learning-focused; every step includes a minor lesson or teachable moment.

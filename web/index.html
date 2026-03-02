@@ -272,6 +272,8 @@
       </p>
       <div class="login-section">
         <form id="setup-form">
+          <label for="setup-username">Username</label>
+          <input type="text" id="setup-username" name="username" autocomplete="username" placeholder="Choose a username" required style="min-width: 14rem; display: block; margin: 0.25rem 0;">
           <label for="setup-password">Choose master password</label>
           <input type="password" id="setup-password" name="password" autocomplete="new-password" placeholder="Enter a password" required style="min-width: 14rem; display: block; margin: 0.25rem 0;">
           <label for="setup-confirm">Confirm master password</label>
@@ -287,20 +289,44 @@
     </p>
     <div id="unlock-password-area">
       <div class="login-section">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" autocomplete="username" placeholder="Your username" style="min-width: 14rem; display: block; margin: 0.25rem 0;">
         <label for="password">Master password</label>
-        <p class="login-recovery-note" id="password-hint">The one password you chose when you first set up the vault.</p>
+        <p class="login-recovery-note" id="password-hint">The password you chose for this account.</p>
         <form id="login-form" style="display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.25rem;">
           <input type="password" id="password" name="password" autocomplete="current-password" placeholder="Enter your master password" style="min-width: 14rem;">
-          <button type="submit">Unlock</button>
+          <button type="submit">Log in</button>
         </form>
       </div>
       <p class="login-recovery-link">
         <button type="button" id="show-recovery-unlock">Forgot your password? Use your recovery key instead.</button>
       </p>
+      <p class="login-recovery-link" style="margin-top: 0.5rem;">
+        <button type="button" id="show-signup">Create account</button>
+      </p>
+    </div>
+    <div id="signup-area" class="hidden">
+      <div class="login-section">
+        <p class="login-intro">Create a new account. You will have your own folders and recovery settings.</p>
+        <form id="signup-form">
+          <label for="signup-username">Username</label>
+          <input type="text" id="signup-username" name="username" autocomplete="username" placeholder="Choose a username" required style="min-width: 14rem; display: block; margin: 0.25rem 0;">
+          <label for="signup-password">Master password</label>
+          <input type="password" id="signup-password" name="password" autocomplete="new-password" placeholder="Choose a password" required style="min-width: 14rem; display: block; margin: 0.25rem 0;">
+          <label for="signup-confirm">Confirm password</label>
+          <input type="password" id="signup-confirm" name="confirm" autocomplete="new-password" placeholder="Same password again" required style="min-width: 14rem; display: block; margin: 0.25rem 0;">
+          <button type="submit" style="margin-top: 0.5rem;">Create account</button>
+        </form>
+        <p style="margin-top: 0.5rem;">
+          <button type="button" id="back-from-signup" class="login-recovery-link">Back to log in</button>
+        </p>
+      </div>
     </div>
 
     <div id="unlock-recovery-area" class="hidden">
       <div class="login-section">
+        <label for="recovery-username-input">Username</label>
+        <input type="text" id="recovery-username-input" autocomplete="username" placeholder="Your username" style="min-width: 14rem; display: block; margin: 0.25rem 0;">
         <label for="recovery-key-input">Recovery key</label>
         <p class="login-recovery-note">Paste the long key you saved when you set up recovery. You only get this key once—if you didn’t save it, you’ll need your master password.</p>
         <textarea id="recovery-key-input" rows="4" placeholder="Paste your recovery key here…" aria-label="Recovery key" style="width: 100%; max-width: 28rem; margin-top: 0.25rem;"></textarea>
@@ -315,7 +341,9 @@
     </div>
     <div id="unlock-questions-area" class="hidden">
       <div class="login-section">
-        <p class="login-recovery-note">Answer the three questions you set up. Answers are case-sensitive.</p>
+        <label for="questions-username-input">Username</label>
+        <input type="text" id="questions-username-input" autocomplete="username" placeholder="Your username" style="min-width: 14rem; display: block; margin: 0.25rem 0;">
+        <p class="login-recovery-note">Answer the three questions you set up for this account. Answers are case-sensitive.</p>
         <div id="unlock-questions-form-container"></div>
         <p style="margin-top: 0.5rem;">
           <button type="button" id="unlock-with-questions-btn">Unlock with answers</button>
@@ -439,10 +467,9 @@
     <aside id="right-panel" class="page-card">
       <h2>Today’s thought</h2>
       <div id="quote-body">
-        <span id="quote-text">Loading quote…</span>
+        <span id="quote-text"></span>
         <span id="quote-author"></span>
       </div>
-      <p id="quote-meta">Quotes are fetched from the internet and cached in your browser for 24 hours.</p>
       <p id="quote-error" class="error hidden"></p>
     </aside>
   </div>

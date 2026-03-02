@@ -1,0 +1,16 @@
+# Avoid copying local dev and repo cruft into the image.
+.venv
+__pycache__
+*.py[cod]
+.git
+.gitignore
+*.md
+!README.md
+.pytest_cache
+.coverage
+htmlcov
+.env
+.env.*
+*.db
+audit.log
+demo_vault.db

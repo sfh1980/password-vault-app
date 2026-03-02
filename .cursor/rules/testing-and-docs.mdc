@@ -1,13 +1,26 @@
 ---
-description: Testing and documentation — run tests before marking done; update HOW_IT_WORKS and EDUCATIONAL_CODE_WALKTHROUGH
+description: Testing and documentation — testing workflow tied to agent trios; run tests before marking done; update USER_GUIDE and EDUCATIONAL_CODE_WALKTHROUGH
 globs: ["**/test_*.py", "**/*_test.py", "**/*.md", "**/tests/**"]
 ---
 
 # Testing and documentation
 
+## Testing workflow (ensures the app works and stays secure)
+
+Testing is part of the mandatory agent workflow (see `agent-workflow-required.mdc` and `orchestration.mdc`):
+
+1. **Per-domain:** For each domain (backend, database, frontend), the **tester** subagent runs after the developer. Backend-tester and database-tester run `pytest tests/` from repo root with the project venv and report pass/fail; frontend-tester validates UI behavior. No feature or refactor is "done" for that domain until the tester has run and passed.
+2. **Full suite before sign-off:** Before marking a feature or release "done" or "secure," run the full test suite: `pytest tests/` from repo root. All tests must pass. Do not skip this step.
+3. **Security-sensitive work:** For auth, crypto, sessions, or user data changes, run **security-auditor** (after asking "Proceed?") so the app is validated against `.cursor/rules/security.mdc`. Treat security-auditor as part of the testing workflow for any change that touches security boundaries.
+4. **Verifier:** On the critical path (e.g. before integration-reviewer or when confirming "this is done"), run the **verifier** subagent to validate that claimed work is actually functional.
+
+This workflow ensures testing is not ad hoc: it is part of the planner → developer → **tester** sequence and is required before the app is considered working and secure.
+
+## Test implementation
+
 - **Tests:** Before marking a task "done," run the relevant tests (e.g. `pytest`). Prefer a test DB or temp file for migrations and DB-dependent tests; do not assume production DB.
 - **New behavior:** When adding features, add or extend tests for the new code (status codes, validation, session required, encryption boundaries as appropriate).
-- **HOW_IT_WORKS.md:** Update when user-facing behavior or steps change. Keep instructions step-by-step, in layman's terms, with "What this does" and "You should see" where helpful.
+- **USER_GUIDE.md:** Update when user-facing behavior or steps change. Keep instructions step-by-step, in layman's terms, with "What this does" and "You should see" where helpful.
 - **EDUCATIONAL_CODE_WALKTHROUGH.md:** Update when code or architecture changes. Explain what each part does, how it interacts with the rest of the app, and why (standards, algorithms) in layman's terms. Add teachable moments for patterns that reinforce project practices.
 - **Refactoring:** Per project-context, do not auto-refactor; walk the user through what to change and why so the lesson sticks. Tests and docs should still be updated after refactors.
 

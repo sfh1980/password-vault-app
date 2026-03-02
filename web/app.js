@@ -6,6 +6,7 @@
 (function () {
   'use strict';
 
+  /** Must match backend VAULT_SESSION_TIMEOUT_MINUTES (default 15). */
   const SESSION_TIMEOUT_MINUTES = 15;
   const CLIPBOARD_CLEAR_MS = 30000;
 
@@ -72,6 +73,9 @@
   function applyVaultStatus(initialized) {
     loginError.classList.add('hidden');
     loginMessage.classList.add('hidden');
+    if (unlockQuestionsArea) unlockQuestionsArea.classList.add('hidden');
+    var signupArea = document.getElementById('signup-area');
+    if (signupArea) signupArea.classList.add('hidden');
     if (initialized) {
       firstTimeSetupArea.classList.add('hidden');
       unlockIntro.classList.remove('hidden');
@@ -139,52 +143,10 @@
     }
   }
 
+  /** Set a static quote. No external API to avoid third-party dependency and failure surface. */
   function loadQuoteOfDay() {
     if (!quoteText) return;
-    var CACHE_KEY = 'vault_side_quote';
-    var TS_KEY = 'vault_side_quote_ts';
-    var ONE_DAY_MS = 24 * 60 * 60 * 1000;
-    try {
-      var now = Date.now();
-      var tsStr = window.localStorage ? window.localStorage.getItem(TS_KEY) : null;
-      var cached = window.localStorage ? window.localStorage.getItem(CACHE_KEY) : null;
-      if (tsStr && cached) {
-        var ts = parseInt(tsStr, 10);
-        if (!Number.isNaN(ts) && now - ts < ONE_DAY_MS) {
-          var data = JSON.parse(cached);
-          setQuote(data.content, data.author);
-          return;
-        }
-      }
-    } catch (e) {
-      // Ignore cache errors and fall back to fetching.
-    }
-
-    fetch('https://api.quotable.io/random?maxLength=140')
-      .then(function (r) { return r.json(); })
-      .then(function (data) {
-        var content = data && data.content ? data.content : '';
-        var author = data && data.author ? data.author : '';
-        if (!content) {
-          throw new Error('No quote content');
-        }
-        setQuote(content, author);
-        try {
-          if (window.localStorage) {
-            window.localStorage.setItem(CACHE_KEY, JSON.stringify({ content: content, author: author }));
-            window.localStorage.setItem(TS_KEY, String(Date.now()));
-          }
-        } catch (e) {
-          // Ignore storage failures.
-        }
-      })
-      .catch(function () {
-        setQuote('Security is a process, not a product.', 'Bruce Schneier');
-        if (quoteError) {
-          quoteError.textContent = 'Offline or quote service unavailable.';
-          quoteError.classList.remove('hidden');
-        }
-      });
+    setQuote('Security is a process, not a product.', 'Bruce Schneier');
   }
 
   function showLogin(message) {
@@ -246,14 +208,23 @@
   /**
    * Copy password to clipboard; clear clipboard after CLIPBOARD_CLEAR_MS.
    * We do not keep the password in a variable after this call.
+   * Guards against missing clipboard API (e.g. non-HTTPS, old browsers).
    */
   function copyPassword(plaintext) {
+    if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+      showVaultError('Clipboard not available. Copy the password manually.');
+      return;
+    }
     if (clipboardClearTimerId) clearTimeout(clipboardClearTimerId);
     navigator.clipboard.writeText(plaintext).then(function () {
       clipboardClearTimerId = setTimeout(function () {
-        navigator.clipboard.writeText('');
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText('');
+        }
         clipboardClearTimerId = null;
       }, CLIPBOARD_CLEAR_MS);
+    }).catch(function () {
+      showVaultError('Could not copy to clipboard.');
     });
   }
 
@@ -400,7 +371,7 @@
     entryDetail.innerHTML =
       '<p><strong>' + escapeHtml(entry.title) + '</strong></p>' +
       (entry.username ? '<p>Username: ' + escapeHtml(entry.username) + '</p>' : '') +
-      (entry.url ? '<p>URL: <a href="' + escapeHtml(entry.url) + '" target="_blank" rel="noopener">' + escapeHtml(entry.url) + '</a></p>' : '') +
+      (entry.url ? '<p>URL: <a href="' + escapeHtml(safeUrlForHref(entry.url)) + '" target="_blank" rel="noopener">' + escapeHtml(entry.url) + '</a></p>' : '') +
       (entry.notes ? '<p>Notes: ' + escapeHtml(entry.notes) + '</p>' : '') +
       '<button type="button" id="copy-detail-password">Copy password</button> ' +
       '<button type="button" id="edit-entry-btn" class="btn-secondary">Edit</button> ' +
@@ -506,6 +477,14 @@
     return div.innerHTML;
   }
 
+  /** Only allow http/https in href to prevent javascript: or data: XSS. Returns '#' for unsafe schemes. */
+  function safeUrlForHref(url) {
+    if (!url || typeof url !== 'string') return '#';
+    var trimmed = url.trim().toLowerCase();
+    if (trimmed.indexOf('http://') === 0 || trimmed.indexOf('https://') === 0) return url.trim();
+    return '#';
+  }
+
   function unlockWithPayload(payload) {
     loginError.classList.add('hidden');
     return api('/unlock', {
@@ -516,6 +495,7 @@
       .then(function (data) {
         setSessionId(data.session_id);
         document.getElementById('password').value = '';
+        if (document.getElementById('username')) document.getElementById('username').value = '';
         if (recoveryKeyInput) recoveryKeyInput.value = '';
         showVault();
         loadFolders().then(function () { loadRecoveryStatus(); });
@@ -530,21 +510,30 @@
 
   loginForm.addEventListener('submit', function (e) {
     e.preventDefault();
+    const username = document.getElementById('username').value.trim();
     const password = document.getElementById('password').value;
+    if (!username) {
+      loginError.textContent = 'Enter your username.';
+      loginError.classList.remove('hidden');
+      return;
+    }
     if (!password.trim()) {
       loginError.textContent = 'Enter your master password.';
       loginError.classList.remove('hidden');
       return;
     }
-    unlockWithPayload({ password: password });
+    unlockWithPayload({ username: username, password: password });
   });
 
   document.getElementById('show-recovery-unlock').addEventListener('click', function () {
     unlockPasswordArea.classList.add('hidden');
     unlockRecoveryArea.classList.remove('hidden');
+    var u = document.getElementById('username');
+    var ru = document.getElementById('recovery-username-input');
+    if (u && ru) ru.value = u.value;
     loginError.classList.add('hidden');
     recoveryKeyInput.value = '';
-    recoveryKeyInput.focus();
+    if (ru) ru.focus(); else recoveryKeyInput.focus();
   });
 
   document.getElementById('back-to-password-btn').addEventListener('click', function () {
@@ -555,33 +544,49 @@
   });
 
   document.getElementById('unlock-with-recovery-btn').addEventListener('click', function () {
-    const key = recoveryKeyInput.value.trim();
+    var ru = document.getElementById('recovery-username-input');
+    var username = ru ? ru.value.trim() : '';
+    var key = recoveryKeyInput.value.trim();
+    if (!username) {
+      loginError.textContent = 'Enter your username.';
+      loginError.classList.remove('hidden');
+      return;
+    }
     if (!key) {
       loginError.textContent = 'Paste your recovery key.';
       loginError.classList.remove('hidden');
       return;
     }
-    unlockWithPayload({ recovery_key: key });
+    unlockWithPayload({ username: username, recovery_key: key });
   });
 
   document.getElementById('show-recovery-questions-unlock').addEventListener('click', function () {
-    fetch('/recovery/questions')
+    var ru = document.getElementById('recovery-username-input');
+    var username = (ru ? ru.value.trim() : '') || (document.getElementById('username') ? document.getElementById('username').value.trim() : '');
+    if (!username) {
+      loginError.textContent = 'Enter your username first.';
+      loginError.classList.remove('hidden');
+      return;
+    }
+    unlockRecoveryArea.classList.add('hidden');
+    unlockQuestionsArea.classList.remove('hidden');
+    var qu = document.getElementById('questions-username-input');
+    if (qu) qu.value = username;
+    loginError.classList.add('hidden');
+    fetch('/recovery/questions?username=' + encodeURIComponent(username))
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (!data.questions_configured || !data.questions || data.questions.length !== 3) {
-          loginError.textContent = 'Security questions are not set up for this vault.';
+          loginError.textContent = 'Security questions are not set up for this account.';
           loginError.classList.remove('hidden');
           return;
         }
-        unlockRecoveryArea.classList.add('hidden');
-        unlockQuestionsArea.classList.remove('hidden');
-        loginError.classList.add('hidden');
         unlockQuestionsFormContainer.innerHTML = '';
         data.questions.forEach(function (q, i) {
-          const label = document.createElement('label');
+          var label = document.createElement('label');
           label.setAttribute('for', 'unlock-answer-' + (i + 1));
           label.textContent = q || 'Question ' + (i + 1);
-          const input = document.createElement('input');
+          var input = document.createElement('input');
           input.type = 'password';
           input.id = 'unlock-answer-' + (i + 1);
           input.placeholder = 'Your answer';
@@ -604,28 +609,49 @@
   });
 
   document.getElementById('unlock-with-questions-btn').addEventListener('click', function () {
-    const inputs = unlockQuestionsFormContainer.querySelectorAll('input[type="password"]');
+    var qu = document.getElementById('questions-username-input');
+    var username = qu ? qu.value.trim() : '';
+    var inputs = unlockQuestionsFormContainer.querySelectorAll('input[type="password"]');
+    if (!username) {
+      loginError.textContent = 'Enter your username.';
+      loginError.classList.remove('hidden');
+      return;
+    }
     if (!inputs || inputs.length !== 3) {
       loginError.textContent = 'Answer all three questions.';
       loginError.classList.remove('hidden');
       return;
     }
-    const answers = [inputs[0].value, inputs[1].value, inputs[2].value];
+    var answers = [inputs[0].value, inputs[1].value, inputs[2].value];
     if (answers.some(function (a) { return !a.trim(); })) {
       loginError.textContent = 'Answer all three questions.';
       loginError.classList.remove('hidden');
       return;
     }
     loginError.classList.add('hidden');
-    unlockWithPayload({ recovery_answers: answers });
+    unlockWithPayload({ username: username, recovery_answers: answers });
   });
 
-  setupForm.addEventListener('submit', function (e) {
-    e.preventDefault();
-    const pwd = document.getElementById('setup-password').value;
-    const confirm = document.getElementById('setup-confirm').value;
+  /**
+   * Submit auth form (setup or signup). Validates username, password, confirm; POSTs to endpoint; on success shows vault.
+   * @param {string} endpoint - '/setup' or '/signup'
+   * @param {string} usernameId - id of username input
+   * @param {string} passwordId - id of password input
+   * @param {string} confirmId - id of confirm input
+   * @param {string} errorMsg - e.g. 'Setup failed' or 'Signup failed'
+   * @param {function} [onSuccess] - optional cleanup (e.g. hide signup area, clear fields)
+   */
+  function submitAuthForm(endpoint, usernameId, passwordId, confirmId, errorMsg, onSuccess) {
+    var username = document.getElementById(usernameId).value.trim();
+    var pwd = document.getElementById(passwordId).value;
+    var confirmVal = document.getElementById(confirmId).value;
     loginError.classList.add('hidden');
-    if (pwd !== confirm) {
+    if (!username) {
+      loginError.textContent = 'Enter a username.';
+      loginError.classList.remove('hidden');
+      return;
+    }
+    if (pwd !== confirmVal) {
       loginError.textContent = 'Passwords do not match.';
       loginError.classList.remove('hidden');
       return;
@@ -635,35 +661,68 @@
       loginError.classList.remove('hidden');
       return;
     }
-    fetch('/setup', {
+    fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: pwd }),
+      body: JSON.stringify({ username: username, password: pwd }),
     })
       .then(function (r) {
-        if (!r.ok) return r.json().then(function (d) { throw new Error(d.detail || 'Setup failed'); });
+        if (!r.ok) return r.json().then(function (d) { throw new Error(d.detail || errorMsg); });
         return r.json();
       })
       .then(function (data) {
         setSessionId(data.session_id);
-        document.getElementById('setup-password').value = '';
-        document.getElementById('setup-confirm').value = '';
+        document.getElementById(usernameId).value = '';
+        document.getElementById(passwordId).value = '';
+        document.getElementById(confirmId).value = '';
+        if (onSuccess) onSuccess();
         showVault();
         loadFolders().then(function () { loadRecoveryStatus(); });
       })
       .catch(function (err) {
-        loginError.textContent = err.message || 'Setup failed.';
+        loginError.textContent = err.message || errorMsg;
         loginError.classList.remove('hidden');
       });
+  }
+
+  setupForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    submitAuthForm('/setup', 'setup-username', 'setup-password', 'setup-confirm', 'Setup failed');
   });
 
+  if (document.getElementById('show-signup')) {
+    document.getElementById('show-signup').addEventListener('click', function () {
+      unlockPasswordArea.classList.add('hidden');
+      document.getElementById('signup-area').classList.remove('hidden');
+      loginError.classList.add('hidden');
+    });
+  }
+  if (document.getElementById('back-from-signup')) {
+    document.getElementById('back-from-signup').addEventListener('click', function () {
+      document.getElementById('signup-area').classList.add('hidden');
+      unlockPasswordArea.classList.remove('hidden');
+      loginError.classList.add('hidden');
+    });
+  }
+  if (document.getElementById('signup-form')) {
+    document.getElementById('signup-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      submitAuthForm('/signup', 'signup-username', 'signup-password', 'signup-confirm', 'Signup failed', function () {
+        document.getElementById('signup-area').classList.add('hidden');
+        unlockPasswordArea.classList.remove('hidden');
+      });
+    });
+  }
+
   document.getElementById('reset-vault-btn').addEventListener('click', function () {
-    const pwd = prompt('Enter your master password to reset the vault (for testing). This will delete all data.');
+    var username = prompt('Enter your username to reset the vault (for testing). This will delete all data.');
+    if (username === null || username === '') return;
+    var pwd = prompt('Enter your master password to confirm.');
     if (pwd === null || pwd === '') return;
     fetch('/vault/reset', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: pwd }),
+      body: JSON.stringify({ username: username, password: pwd }),
     })
       .then(function (r) {
         if (!r.ok) return r.json().then(function (d) { throw new Error(d.detail || 'Reset failed'); });

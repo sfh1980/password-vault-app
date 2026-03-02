@@ -22,7 +22,7 @@ Each domain has three subagents: **planner**, **developer**, **tester**. Use the
 - **Developer** implements from the handoff and produces a short handoff for the tester. Invoke: `/frontend-developer`, etc., and pass the planner's output or path.
 - **Tester** verifies and reports pass/fail. Invoke: `/frontend-tester`, etc., and pass the developer's handoff or path.
 
-Handoff location: `docs/handoffs/` (e.g. `frontend-YYYYMMDD.md`). Frontend and backend share a **written API contract** (in handoffs or `docs/api-contract.md`): exact endpoints, request/response shapes so both sides stay aligned.
+Handoff location: `docs/handoffs/` (e.g. `frontend-YYYYMMDD.md`). Frontend and backend share a **written API contract** (in handoffs or DEVELOPER_REFERENCE.md § API contract): exact endpoints, request/response shapes so both sides stay aligned.
 
 **Testing:** Standard layout is `tests/`. Backend-tester and database-tester run `pytest tests/` from repo root with the project venv.
 
@@ -36,9 +36,9 @@ When a feature touches multiple domains (e.g. recovery key: backend + database +
 
 ## When to use which subagents
 
-- **Single-domain feature:** Ask "Proceed?" → run that domain's planner → developer → tester in one go; then ask "Do you want to git commit?" Run **verifier** after (on critical path). Run **documentation-educator** to update HOW_IT_WORKS.md and VOCAB.md only (no EDUCATIONAL_CODE_WALKTHROUGH or teachable moments until the user says "completion").
+- **Single-domain feature:** Ask "Proceed?" → run that domain's planner → developer → tester in one go; then ask "Do you want to git commit?" Run **verifier** after (on critical path). Run **documentation-educator** to update USER_GUIDE.md and VOCAB (glossary in DEVELOPER_REFERENCE.md) only (no EDUCATIONAL_CODE_WALKTHROUGH or teachable moments until the user says "completion").
 - **Cross-domain feature:** Run relevant domain trios (with Proceed? each time), then **integration-reviewer**; then verifier and documentation-educator as above.
 - **Security review:** Ask "Running security-auditor is recommended. Proceed?" then invoke **security-auditor** if the user says yes.
-- **After "done":** Invoke **verifier**; invoke **documentation-educator** (HOW_IT_WORKS + VOCAB only).
+- **After "done":** Invoke **verifier**; invoke **documentation-educator** (USER_GUIDE + VOCAB only).
 
 All custom subagents are defined in `.cursor/agents/`. See `.cursor/agents/README.md` for the full roster and examples.

@@ -11,7 +11,9 @@ and SQL; API/CLI call here, never raw SQL elsewhere.
 from __future__ import annotations
 
 import re
+import secrets
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -83,12 +85,83 @@ def open_db(path: str | Path) -> sqlite3.Connection:
     return conn
 
 
+@contextmanager
+def db_connection(path: str | Path):
+    """Context manager: open DB, yield connection, close on exit. Use in API routes."""
+    conn = open_db(path)
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
 def get_salt(conn: sqlite3.Connection) -> bytes | None:
-    """Return the vault salt if the vault has been initialized, else None."""
+    """Return the vault salt if the vault has been initialized, else None. Deprecated for new code; use vault_initialized and per-user auth."""
     row = conn.execute("SELECT salt FROM vault_meta WHERE id = 1").fetchone()
     if row and row[0] is not None:
         return bytes(row[0])
     return None
+
+
+def vault_initialized(conn: sqlite3.Connection) -> bool:
+    """True if at least one user exists (vault has been set up)."""
+    row = conn.execute("SELECT 1 FROM users WHERE username IS NOT NULL LIMIT 1").fetchone()
+    return row is not None
+
+
+def init_first_user(conn: sqlite3.Connection, username: str, password: str) -> int:
+    """Create the first user (vault setup). Fails if any user already exists. Returns user_id."""
+    if vault_initialized(conn):
+        raise ValueError("Vault already initialized")
+    return _insert_user(conn, username.strip(), password)
+
+
+def add_user(conn: sqlite3.Connection, username: str, password: str) -> int:
+    """Create a new user (sign up). Username must be unique. Returns user_id."""
+    if not vault_initialized(conn):
+        raise ValueError("Vault not initialized; use setup to create first user")
+    return _insert_user(conn, username.strip(), password)
+
+
+def _insert_user(conn: sqlite3.Connection, username: str, password: str) -> int:
+    """Insert user with username, salt, password_check_encrypted. Returns user_id."""
+    if not username:
+        raise ValueError("Username required")
+    salt = random_bytes(ARGON2_SALT_LEN)
+    key = derive_key(password.encode("utf-8"), salt)
+    blob = encrypt(key, b"ok")
+    cur = conn.execute(
+        """INSERT INTO users (username, salt, password_check_encrypted, created_at)
+           VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))""",
+        (username, salt, blob),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def get_user_by_username(conn: sqlite3.Connection, username: str) -> dict[str, Any] | None:
+    """Return user row (id, username, salt, password_check_encrypted) or None."""
+    row = conn.execute(
+        "SELECT id, username, salt, password_check_encrypted FROM users WHERE username = ?",
+        (username.strip(),),
+    ).fetchone()
+    if not row:
+        return None
+    return dict(row)
+
+
+def verify_user_password(conn: sqlite3.Connection, username: str, password: str) -> tuple[int, bytes] | None:
+    """Verify username+password; return (user_id, key) or None."""
+    user = get_user_by_username(conn, username)
+    if not user or user["salt"] is None or user["password_check_encrypted"] is None:
+        return None
+    key = derive_key(password.encode("utf-8"), bytes(user["salt"]))
+    try:
+        if decrypt(key, bytes(user["password_check_encrypted"])) != b"ok":
+            return None
+    except InvalidTag:
+        return None
+    return (user["id"], key)
 
 
 def init_salt(conn: sqlite3.Connection) -> bytes:
@@ -128,14 +201,15 @@ def verify_password_check(conn: sqlite3.Connection, key: bytes) -> bool | None:
         return False
 
 
-# --- Recovery key (unlock when master password is forgotten) ---
+# --- Recovery (per-user; unlock when master password is forgotten) ---
 
 
-def get_recovery_configured(conn: sqlite3.Connection) -> bool:
-    """True if any recovery method is set (key and/or questions)."""
+def get_recovery_configured(conn: sqlite3.Connection, user_id: int) -> bool:
+    """True if this user has any recovery method set (key and/or questions)."""
     row = conn.execute(
         """SELECT recovery_salt, wrapped_master_key, recovery_qa_salt, recovery_qa_wrapped
-           FROM vault_meta WHERE id = 1"""
+           FROM users WHERE id = ?""",
+        (user_id,),
     ).fetchone()
     if not row:
         return False
@@ -144,10 +218,11 @@ def get_recovery_configured(conn: sqlite3.Connection) -> bool:
     return key_ok or qa_ok
 
 
-def get_recovery_methods(conn: sqlite3.Connection) -> tuple[bool, bool]:
-    """Return (key_configured, questions_configured)."""
+def get_recovery_methods(conn: sqlite3.Connection, user_id: int) -> tuple[bool, bool]:
+    """Return (key_configured, questions_configured) for this user."""
     row = conn.execute(
-        "SELECT recovery_salt, wrapped_master_key, recovery_qa_salt, recovery_qa_wrapped FROM vault_meta WHERE id = 1"
+        "SELECT recovery_salt, wrapped_master_key, recovery_qa_salt, recovery_qa_wrapped FROM users WHERE id = ?",
+        (user_id,),
     ).fetchone()
     if not row:
         return (False, False)
@@ -156,33 +231,59 @@ def get_recovery_methods(conn: sqlite3.Connection) -> tuple[bool, bool]:
     return (key_ok, qa_ok)
 
 
-def get_recovery_questions(conn: sqlite3.Connection) -> tuple[str | None, str | None, str | None]:
-    """Return (q1, q2, q3) if questions recovery is set; else (None, None, None). No auth; used on unlock page."""
+def get_recovery_questions(conn: sqlite3.Connection, user_id: int) -> tuple[str | None, str | None, str | None]:
+    """Return (q1, q2, q3) if this user has questions recovery; else (None, None, None)."""
     row = conn.execute(
-        "SELECT recovery_question_1, recovery_question_2, recovery_question_3 FROM vault_meta WHERE id = 1"
+        "SELECT recovery_question_1, recovery_question_2, recovery_question_3 FROM users WHERE id = ?",
+        (user_id,),
     ).fetchone()
     if not row or row[0] is None:
         return (None, None, None)
     return (str(row[0]), str(row[1]), str(row[2]))
 
 
+def get_recovery_questions_by_username(conn: sqlite3.Connection, username: str) -> tuple[str | None, str | None, str | None]:
+    """Return (q1, q2, q3) for the user with this username; else (None, None, None). No auth; used on unlock page."""
+    user = get_user_by_username(conn, username.strip())
+    if not user:
+        return (None, None, None)
+    return get_recovery_questions(conn, user["id"])
+
+
 def set_recovery(
     conn: sqlite3.Connection,
+    user_id: int,
     recovery_salt: bytes,
     wrapped_master_key: bytes,
 ) -> None:
-    """Store recovery salt and wrapped master key. Call when user sets up recovery (must be unlocked)."""
+    """Store recovery salt and wrapped master key for this user."""
     conn.execute(
-        "UPDATE vault_meta SET recovery_salt = ?, wrapped_master_key = ? WHERE id = 1",
-        (recovery_salt, wrapped_master_key),
+        "UPDATE users SET recovery_salt = ?, wrapped_master_key = ? WHERE id = ?",
+        (recovery_salt, wrapped_master_key, user_id),
     )
     conn.commit()
 
 
-def get_recovery_material(conn: sqlite3.Connection) -> tuple[bytes | None, bytes | None]:
-    """Return (recovery_salt, wrapped_master_key) or (None, None) if not configured."""
+def generate_and_store_recovery(
+    conn: sqlite3.Connection, user_id: int, master_key: bytes
+) -> str:
+    """
+    Generate a recovery key, derive from it, wrap master key, store for user.
+    Returns the recovery key string (show once to user). Used by API.
+    """
+    recovery_key = secrets.token_hex(32)
+    recovery_salt = random_bytes(ARGON2_SALT_LEN)
+    recovery_derived = derive_key(recovery_key.encode("utf-8"), recovery_salt)
+    wrapped = encrypt(recovery_derived, master_key)
+    set_recovery(conn, user_id, recovery_salt, wrapped)
+    return recovery_key
+
+
+def get_recovery_material(conn: sqlite3.Connection, user_id: int) -> tuple[bytes | None, bytes | None]:
+    """Return (recovery_salt, wrapped_master_key) for this user or (None, None)."""
     row = conn.execute(
-        "SELECT recovery_salt, wrapped_master_key FROM vault_meta WHERE id = 1"
+        "SELECT recovery_salt, wrapped_master_key FROM users WHERE id = ?",
+        (user_id,),
     ).fetchone()
     if not row or row[0] is None or row[1] is None:
         return (None, None)
@@ -190,19 +291,21 @@ def get_recovery_material(conn: sqlite3.Connection) -> tuple[bytes | None, bytes
 
 
 def unlock_with_recovery_key(
-    conn: sqlite3.Connection, recovery_key_bytes: bytes
-) -> bytes | None:
+    conn: sqlite3.Connection, username: str, recovery_key_bytes: bytes
+) -> tuple[int, bytes] | None:
     """
-    Derive key from recovery key and unwrap master key. Returns master_key or None if
-    recovery not configured or recovery key is wrong (decrypt fails).
+    Unlock user by username and recovery key. Returns (user_id, master_key) or None.
     """
-    recovery_salt, wrapped = get_recovery_material(conn)
+    user = get_user_by_username(conn, username.strip())
+    if not user:
+        return None
+    recovery_salt, wrapped = get_recovery_material(conn, user["id"])
     if recovery_salt is None or wrapped is None:
         return None
     try:
         recovery_derived = derive_key(recovery_key_bytes, recovery_salt)
         master_key = decrypt(recovery_derived, wrapped)
-        return master_key
+        return (user["id"], master_key)
     except InvalidTag:
         return None
 
@@ -213,6 +316,7 @@ _QA_DELIM = "\x00"
 
 def set_recovery_questions(
     conn: sqlite3.Connection,
+    user_id: int,
     master_key: bytes,
     question_1: str,
     question_2: str,
@@ -221,25 +325,26 @@ def set_recovery_questions(
     answer_2: str,
     answer_3: str,
 ) -> None:
-    """Store 3 questions (plaintext) and master key wrapped with key derived from the 3 answers."""
+    """Store 3 questions and wrapped master key for this user."""
     qa_salt = random_bytes(ARGON2_SALT_LEN)
     key_material = (answer_1 + _QA_DELIM + answer_2 + _QA_DELIM + answer_3).encode("utf-8")
     derived = derive_key(key_material, qa_salt)
     wrapped = encrypt(derived, master_key)
     conn.execute(
-        """UPDATE vault_meta SET
+        """UPDATE users SET
            recovery_qa_salt = ?, recovery_qa_wrapped = ?,
            recovery_question_1 = ?, recovery_question_2 = ?, recovery_question_3 = ?
-           WHERE id = 1""",
-        (qa_salt, wrapped, question_1.strip(), question_2.strip(), question_3.strip()),
+           WHERE id = ?""",
+        (qa_salt, wrapped, question_1.strip(), question_2.strip(), question_3.strip(), user_id),
     )
     conn.commit()
 
 
-def get_qa_recovery_material(conn: sqlite3.Connection) -> tuple[bytes | None, bytes | None]:
-    """Return (recovery_qa_salt, recovery_qa_wrapped) or (None, None)."""
+def get_qa_recovery_material(conn: sqlite3.Connection, user_id: int) -> tuple[bytes | None, bytes | None]:
+    """Return (recovery_qa_salt, recovery_qa_wrapped) for this user or (None, None)."""
     row = conn.execute(
-        "SELECT recovery_qa_salt, recovery_qa_wrapped FROM vault_meta WHERE id = 1"
+        "SELECT recovery_qa_salt, recovery_qa_wrapped FROM users WHERE id = ?",
+        (user_id,),
     ).fetchone()
     if not row or row[0] is None or row[1] is None:
         return (None, None)
@@ -247,16 +352,20 @@ def get_qa_recovery_material(conn: sqlite3.Connection) -> tuple[bytes | None, by
 
 
 def unlock_with_recovery_answers(
-    conn: sqlite3.Connection, answer_1: str, answer_2: str, answer_3: str
-) -> bytes | None:
-    """Derive key from 3 answers and unwrap master key. Returns master_key or None if wrong."""
-    qa_salt, wrapped = get_qa_recovery_material(conn)
+    conn: sqlite3.Connection, username: str, answer_1: str, answer_2: str, answer_3: str
+) -> tuple[int, bytes] | None:
+    """Unlock user by username and 3 answers. Returns (user_id, master_key) or None."""
+    user = get_user_by_username(conn, username.strip())
+    if not user:
+        return None
+    qa_salt, wrapped = get_qa_recovery_material(conn, user["id"])
     if qa_salt is None or wrapped is None:
         return None
     try:
         key_material = (answer_1 + _QA_DELIM + answer_2 + _QA_DELIM + answer_3).encode("utf-8")
         derived = derive_key(key_material, qa_salt)
-        return decrypt(derived, wrapped)
+        master_key = decrypt(derived, wrapped)
+        return (user["id"], master_key)
     except InvalidTag:
         return None
 

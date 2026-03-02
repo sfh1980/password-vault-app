@@ -1,0 +1,21 @@
+# Run the vault app in Docker. Data lives in a named volume.
+# From repo root: docker compose up -d
+# Then open http://127.0.0.1:8050 (or let Nginx proxy to this port).
+services:
+  vault:
+    build: .
+    image: vault-app:latest
+    container_name: vault
+    ports:
+      # Bind to localhost only so only Nginx (or host) can reach the app. 8050 avoids 8000 (Portainer), 8080 (sabnzbd), etc.
+      - "127.0.0.1:8050:8000"
+    volumes:
+      - vault-data:/data
+    environment:
+      VAULT_DB_PATH: /data/vault.db
+      VAULT_AUDIT_LOG_PATH: /data/audit.log
+      VAULT_SESSION_TIMEOUT_MINUTES: "15"
+    restart: unless-stopped
+
+volumes:
+  vault-data:

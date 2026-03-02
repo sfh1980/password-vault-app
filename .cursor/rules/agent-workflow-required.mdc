@@ -1,0 +1,35 @@
+---
+description: Mandatory rule — all work MUST follow the documented agent workflow and handoff process. Do not bypass.
+alwaysApply: true
+---
+
+# Agent workflow required (non-negotiable)
+
+**This rule cannot be broken.** All feature work, refactors, and cross-domain changes on this project MUST follow the documented agent workflow and handoff process.
+
+## What you must do
+
+1. **Before implementing anything:** Determine which domain(s) the work touches (frontend, backend, database). Read `.cursor/rules/orchestration.mdc` and `AGENTS_AND_WORKFLOW.md` (see DOCS.md for the full index).
+
+2. **Use the trios:** For each affected domain, run the **planner → developer → tester** sequence. Use the mcp_task tool (or equivalent) to invoke the correct subagent types: e.g. `backend-planner`, `backend-developer`, `backend-tester`; `database-planner`, `database-developer`, `database-tester`; `frontend-planner`, `frontend-developer`, `frontend-tester`. Do not implement directly without a planner handoff and without running the developer and tester subagents.
+
+3. **Handoffs:** Write handoffs to `docs/handoffs/` (e.g. `backend-YYYYMMDD.md`, `frontend-YYYYMMDD.md`). Pass planner output to the developer; pass developer output to the tester. For cross-domain work, run **integration-reviewer** after all domain trios and produce `docs/handoffs/master-YYYYMMDD.md`.
+
+4. **Permission:** Before starting each domain trio, ask the user: "Proceed?" (or equivalent). Do not run the trio until the user confirms. After each trio, ask "Do you want to git commit?"
+
+5. **After features:** Run **verifier** on the critical path when appropriate. Run **documentation-educator** to update USER_GUIDE.md and VOCAB (glossary in DEVELOPER_REFERENCE.md). For security-sensitive or PR work, ask "Running security-auditor is recommended. Proceed?" and run **security-auditor** if the user says yes.
+
+6. **Status:** After significant steps, update `docs/agent-status.md`.
+
+## What you must not do
+
+- **Do not** implement a feature or refactor by writing code directly in a single pass without invoking the planner → developer → tester flow for the affected domain(s).
+- **Do not** skip handoffs: no "I'll just do it myself" implementation that bypasses subagents and handoff documents.
+- **Do not** skip "Proceed?" or git-commit prompts; they are part of the workflow.
+
+## Exceptions
+
+- **Trivial, single-file edits** that the user explicitly requests as a "quick fix" (e.g. "fix this typo") may be done directly if the user says so.
+- **Answering questions, explaining code, or generating documentation-only text** does not require running trios.
+
+For any non-trivial change (new feature, refactor, schema change, API change, multi-file change): follow the agent workflow and handoffs. No exceptions unless the user explicitly overrides this rule in the same conversation.
