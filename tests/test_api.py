@@ -7,16 +7,17 @@ from __future__ import annotations
 
 import pytest
 
-from tests.conftest import TEST_MASTER_PASSWORD
+from conftest import TEST_MASTER_PASSWORD
 
 
 # --- Unlock ---
 
 
-def test_unlock_requires_password(client):
-    """POST /unlock with empty or missing password returns 422."""
+def test_unlock_requires_password_or_recovery_key(client):
+    """POST /unlock with neither password nor recovery_key returns 400."""
     r = client.post("/unlock", json={})
-    assert r.status_code == 422
+    assert r.status_code == 400
+    assert "password" in r.json().get("detail", "").lower() or "recovery" in r.json().get("detail", "").lower()
 
 
 def test_unlock_vault_not_initialized_returns_400(client, monkeypatch, tmp_path):
@@ -45,6 +46,37 @@ def test_unlock_success_returns_session_id(initialized_vault):
     assert len(data["session_id"]) > 0
 
 
+def test_unlock_with_both_password_and_recovery_returns_400(initialized_vault):
+    """POST /unlock with both password and recovery_key returns 400."""
+    r = initialized_vault.post(
+        "/unlock",
+        json={"password": "x", "recovery_key": "y"},
+    )
+    assert r.status_code == 400
+    assert "both" in r.json().get("detail", "").lower() or "either" in r.json().get("detail", "").lower()
+
+
+def test_unlock_with_recovery_key_success(initialized_vault, session_headers, client):
+    """Set up recovery, lock, then unlock with recovery_key; get 200 and session_id."""
+    r_setup = client.post("/recovery/setup", headers=session_headers)
+    assert r_setup.status_code == 200
+    recovery_key = r_setup.json()["recovery_key"]
+    assert isinstance(recovery_key, str) and len(recovery_key) > 0
+    client.post("/lock", headers=session_headers)
+    r_unlock = client.post("/unlock", json={"recovery_key": recovery_key})
+    assert r_unlock.status_code == 200
+    data = r_unlock.json()
+    assert "session_id" in data
+    assert isinstance(data["session_id"], str)
+
+
+def test_unlock_with_recovery_key_invalid_returns_400(initialized_vault, client):
+    """POST /unlock with wrong recovery key returns 400 (or recovery not set)."""
+    r = client.post("/unlock", json={"recovery_key": "wrong-key-never-set"})
+    assert r.status_code == 400
+    assert "recovery" in r.json().get("detail", "").lower() or "invalid" in r.json().get("detail", "").lower()
+
+
 # --- Lock ---
 
 
@@ -59,6 +91,35 @@ def test_lock_without_session_returns_204(client):
     """POST /lock without session is idempotent (204)."""
     r = client.post("/lock")
     assert r.status_code == 204
+
+
+# --- Recovery ---
+
+
+def test_recovery_setup_requires_session(initialized_vault, client):
+    """POST /recovery/setup without X-Vault-Session returns 401."""
+    r = client.post("/recovery/setup")
+    assert r.status_code == 401
+
+
+def test_recovery_setup_returns_key_and_status_becomes_configured(initialized_vault, session_headers, client):
+    """POST /recovery/setup with session returns 200 and recovery_key; GET /recovery/status then returns configured true."""
+    r_setup = client.post("/recovery/setup", headers=session_headers)
+    assert r_setup.status_code == 200
+    data = r_setup.json()
+    assert "recovery_key" in data
+    assert isinstance(data["recovery_key"], str)
+    assert len(data["recovery_key"]) > 0
+
+    r_status = client.get("/recovery/status", headers=session_headers)
+    assert r_status.status_code == 200
+    assert r_status.json().get("configured") is True
+
+
+def test_recovery_status_requires_session(initialized_vault, client):
+    """GET /recovery/status without X-Vault-Session returns 401."""
+    r = client.get("/recovery/status")
+    assert r.status_code == 401
 
 
 # --- Folders ---
@@ -272,3 +333,52 @@ def test_delete_entry_success_returns_204(initialized_vault, session_headers):
     r = initialized_vault.get("/entries", params={"folder_id": folder_id}, headers=session_headers)
     assert r.status_code == 200
     assert len(r.json()) == 0
+
+
+# --- Search ---
+
+
+def test_search_requires_session(initialized_vault):
+    """GET /search without session returns 401."""
+    r = initialized_vault.get("/search", params={"q": "test"})
+    assert r.status_code == 401
+
+
+def test_search_empty_q_returns_empty_list(initialized_vault, session_headers):
+    """GET /search?q= returns []."""
+    r = initialized_vault.get("/search", params={"q": ""}, headers=session_headers)
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+def test_search_returns_matching_entries(initialized_vault, session_headers):
+    """Create folder and entry, search by title and by username; results include folder_name."""
+    r = initialized_vault.post("/folders", json={"name": "Search Folder"}, headers=session_headers)
+    assert r.status_code == 200
+    folder_id = r.json()["id"]
+    r = initialized_vault.post(
+        "/entries",
+        json={
+            "folder_id": folder_id,
+            "title": "UniqueSearchTitle",
+            "username": "searchuser",
+            "password": "p",
+            "notes": "some notes",
+            "url": "https://example.com",
+        },
+        headers=session_headers,
+    )
+    assert r.status_code == 200
+    r = initialized_vault.get("/search", params={"q": "UniqueSearchTitle"}, headers=session_headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data) == 1
+    assert data[0]["title"] == "UniqueSearchTitle"
+    assert data[0]["folder_name"] == "Search Folder"
+    assert "folder_id" in data[0]
+    r = initialized_vault.get("/search", params={"q": "searchuser"}, headers=session_headers)
+    assert r.status_code == 200
+    assert len(r.json()) == 1
+    r = initialized_vault.get("/search", params={"q": "nomatch"}, headers=session_headers)
+    assert r.status_code == 200
+    assert r.json() == []

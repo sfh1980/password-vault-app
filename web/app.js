@@ -34,6 +34,18 @@
   const cancelFolderBtn = document.getElementById('cancel-folder-btn');
   const newFolderForm = document.getElementById('new-folder-form');
   const vaultActivity = document.getElementById('vault-activity');
+  const searchInput = document.getElementById('search-input');
+  const searchBtn = document.getElementById('search-btn');
+  const searchResults = document.getElementById('search-results');
+  const searchResultsList = document.getElementById('search-results-list');
+  const searchResultsHeading = document.getElementById('search-results-heading');
+  const unlockPasswordArea = document.getElementById('unlock-password-area');
+  const unlockRecoveryArea = document.getElementById('unlock-recovery-area');
+  const recoveryKeyInput = document.getElementById('recovery-key-input');
+  const setupRecoveryBtn = document.getElementById('setup-recovery-btn');
+  const recoveryConfiguredMsg = document.getElementById('recovery-configured-msg');
+  const recoverySetupResult = document.getElementById('recovery-setup-result');
+  const recoveryKeyDisplay = document.getElementById('recovery-key-display');
 
   /** Folder id for the currently listed entries (so we can refresh after edit/delete). */
   let currentFolderId = null;
@@ -138,6 +150,25 @@
     newFolderNameInput.value = '';
   }
 
+  function loadRecoveryStatus() {
+    api('/recovery/status')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.configured) {
+          setupRecoveryBtn.classList.add('hidden');
+          recoveryConfiguredMsg.classList.remove('hidden');
+        } else {
+          setupRecoveryBtn.classList.remove('hidden');
+          recoveryConfiguredMsg.classList.add('hidden');
+        }
+        recoverySetupResult.classList.add('hidden');
+      })
+      .catch(function () {
+        setupRecoveryBtn.classList.add('hidden');
+        recoveryConfiguredMsg.classList.add('hidden');
+      });
+  }
+
   function loadFolders() {
     return api('/folders').then(function (r) { return r.json(); }).then(function (folders) {
       folderList.innerHTML = '';
@@ -159,9 +190,50 @@
     });
   }
 
+  function hideSearchResults() {
+    searchResults.classList.add('hidden');
+    searchResultsList.innerHTML = '';
+  }
+
+  function showSearchResults(entries) {
+    searchResultsList.innerHTML = '';
+    searchResultsHeading.textContent = 'Search results (' + entries.length + ')';
+    entries.forEach(function (entry) {
+      const li = document.createElement('li');
+      const span = document.createElement('span');
+      span.textContent = entry.title + (entry.folder_name ? ' — ' + entry.folder_name : '');
+      li.appendChild(span);
+      li.addEventListener('click', function () {
+        currentFolderId = entry.folder_id;
+        showEntryDetail(entry);
+        resetInactivityTimer();
+      });
+      searchResultsList.appendChild(li);
+    });
+    searchResults.classList.remove('hidden');
+  }
+
+  function runSearch() {
+    const q = searchInput.value.trim();
+    if (!q) {
+      hideSearchResults();
+      return;
+    }
+    api('/search?q=' + encodeURIComponent(q))
+      .then(function (r) { return r.json(); })
+      .then(function (entries) {
+        showSearchResults(entries);
+        resetInactivityTimer();
+      })
+      .catch(function (err) {
+        if (err.message !== 'Unauthorized') showVaultError(err.message || 'Search failed.');
+      });
+  }
+
   function loadEntries(folderId) {
     currentFolderId = folderId;
     addEntryBtn.dataset.folderId = String(folderId);
+    hideSearchResults();
     return api('/entries?folder_id=' + encodeURIComponent(folderId)).then(function (r) { return r.json(); }).then(function (entries) {
       entryList.innerHTML = '';
       entriesHeading.textContent = 'Entries';
@@ -298,20 +370,19 @@
     return div.innerHTML;
   }
 
-  loginForm.addEventListener('submit', function (e) {
-    e.preventDefault();
+  function unlockWithPayload(payload) {
     loginError.classList.add('hidden');
-    const password = document.getElementById('password').value;
-    api('/unlock', {
+    return api('/unlock', {
       method: 'POST',
-      body: JSON.stringify({ password: password }),
+      body: JSON.stringify(payload),
     })
       .then(function (r) { return r.json(); })
       .then(function (data) {
         setSessionId(data.session_id);
         document.getElementById('password').value = '';
+        if (recoveryKeyInput) recoveryKeyInput.value = '';
         showVault();
-        loadFolders();
+        loadFolders().then(function () { loadRecoveryStatus(); });
       })
       .catch(function (err) {
         if (err.message !== 'Unauthorized') {
@@ -319,6 +390,42 @@
           loginError.classList.remove('hidden');
         }
       });
+  }
+
+  loginForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    const password = document.getElementById('password').value;
+    if (!password.trim()) {
+      loginError.textContent = 'Enter your master password.';
+      loginError.classList.remove('hidden');
+      return;
+    }
+    unlockWithPayload({ password: password });
+  });
+
+  document.getElementById('show-recovery-unlock').addEventListener('click', function () {
+    unlockPasswordArea.classList.add('hidden');
+    unlockRecoveryArea.classList.remove('hidden');
+    loginError.classList.add('hidden');
+    recoveryKeyInput.value = '';
+    recoveryKeyInput.focus();
+  });
+
+  document.getElementById('back-to-password-btn').addEventListener('click', function () {
+    unlockRecoveryArea.classList.add('hidden');
+    unlockPasswordArea.classList.remove('hidden');
+    recoveryKeyInput.value = '';
+    loginError.classList.add('hidden');
+  });
+
+  document.getElementById('unlock-with-recovery-btn').addEventListener('click', function () {
+    const key = recoveryKeyInput.value.trim();
+    if (!key) {
+      loginError.textContent = 'Paste your recovery key.';
+      loginError.classList.remove('hidden');
+      return;
+    }
+    unlockWithPayload({ recovery_key: key });
   });
 
   lockBtn.addEventListener('click', function () {
@@ -364,6 +471,18 @@
 
   vaultActivity.addEventListener('click', resetInactivityTimer);
   vaultActivity.addEventListener('keydown', resetInactivityTimer);
+
+  searchBtn.addEventListener('click', function () {
+    runSearch();
+    resetInactivityTimer();
+  });
+  searchInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      runSearch();
+      resetInactivityTimer();
+    }
+  });
 
   addEntryBtn.addEventListener('click', function () {
     const folderId = addEntryBtn.dataset.folderId;
@@ -415,6 +534,33 @@
       });
   });
 
+  setupRecoveryBtn.addEventListener('click', function () {
+    api('/recovery/setup', { method: 'POST' })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        recoveryKeyDisplay.textContent = data.recovery_key;
+        recoverySetupResult.classList.remove('hidden');
+        setupRecoveryBtn.classList.add('hidden');
+        resetInactivityTimer();
+      })
+      .catch(function (err) {
+        if (err.message !== 'Unauthorized') showVaultError(err.message || 'Failed to set up recovery key.');
+      });
+  });
+
+  document.getElementById('copy-recovery-key-btn').addEventListener('click', function () {
+    const key = recoveryKeyDisplay.textContent;
+    if (key) copyPassword(key);
+    resetInactivityTimer();
+  });
+
+  document.getElementById('recovery-saved-btn').addEventListener('click', function () {
+    recoverySetupResult.classList.add('hidden');
+    recoveryKeyDisplay.textContent = '';
+    loadRecoveryStatus();
+    resetInactivityTimer();
+  });
+
   // On load: if we have a session, try to use it
   if (getSessionId()) {
     api('/folders')
@@ -423,6 +569,7 @@
         showVault();
         return loadFolders();
       })
+      .then(function () { loadRecoveryStatus(); })
       .catch(function () {
         showLogin('');
       });

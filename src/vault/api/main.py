@@ -5,6 +5,7 @@ handlers that call vault_db, audit, and session; no business logic in routes.
 
 from __future__ import annotations
 
+import secrets
 from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException
@@ -14,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from vault import audit, config, vault_db
 from vault.api import session as session_store
-from vault.crypto import derive_key
+from vault.crypto import ARGON2_SALT_LEN, derive_key, encrypt, random_bytes
 from vault.generator import generate_password
 
 app = FastAPI(title="Password Vault API", version="0.1.0")
@@ -26,7 +27,9 @@ session_store.set_timeout_minutes(config.VAULT_SESSION_TIMEOUT_MINUTES)
 
 
 class UnlockRequest(BaseModel):
-    password: str = Field(..., min_length=1)
+    """Exactly one of password or recovery_key must be set."""
+    password: str | None = Field(None, min_length=1)
+    recovery_key: str | None = Field(None, min_length=1)
 
 
 class UnlockResponse(BaseModel):
@@ -63,6 +66,15 @@ class UpdateEntryRequest(BaseModel):
     url: str | None = None
 
 
+class RecoverySetupResponse(BaseModel):
+    """Recovery key shown once; user must store it offline."""
+    recovery_key: str
+
+
+class RecoveryStatusResponse(BaseModel):
+    configured: bool
+
+
 class GeneratePasswordQuery(BaseModel):
     length: int = Field(20, ge=8, le=128)
     upper: bool = True
@@ -93,17 +105,30 @@ def _require_session(x_vault_session: str | None = Header(None, alias="X-Vault-S
 
 @app.post("/unlock", response_model=UnlockResponse)
 def post_unlock(body: UnlockRequest):
-    """Unlock the vault with master password; returns session id. Audit: unlock."""
-    password_bytes = body.password.encode("utf-8")
+    """Unlock with master password or recovery key. Returns session id. Audit: unlock or unlock_recovery."""
+    if body.password is not None and body.recovery_key is not None:
+        raise HTTPException(status_code=400, detail="Provide either password or recovery_key, not both.")
+    if body.password is None and body.recovery_key is None:
+        raise HTTPException(status_code=400, detail="Provide password or recovery_key.")
+
     conn = vault_db.open_db(config.VAULT_DB_PATH)
     try:
-        salt = vault_db.get_salt(conn)
-        if salt is None:
-            raise HTTPException(status_code=400, detail="Vault not initialized; run Phase 2 demo or init first.")
-        key = derive_key(password_bytes, salt)
+        if body.recovery_key is not None:
+            key = vault_db.unlock_with_recovery_key(conn, body.recovery_key.strip().encode("utf-8"))
+            if key is None:
+                raise HTTPException(status_code=400, detail="Invalid recovery key or recovery not set up.")
+        else:
+            salt = vault_db.get_salt(conn)
+            if salt is None:
+                raise HTTPException(status_code=400, detail="Vault not initialized; run Phase 2 demo or init first.")
+            key = derive_key(body.password.encode("utf-8"), salt)
         user_id = vault_db.get_or_create_first_user(conn)
         session_id = session_store.create_session(key, user_id)
-        audit.log_event("unlock", resource_id=None, user_id=user_id)
+        audit.log_event(
+            "unlock_recovery" if body.recovery_key is not None else "unlock",
+            resource_id=None,
+            user_id=user_id,
+        )
         return UnlockResponse(session_id=session_id)
     finally:
         conn.close()
@@ -159,6 +184,22 @@ def get_entries(
         entries = vault_db.get_entries(conn, key, folder_id)
         audit.log_event("list_entries", resource_id=folder_id, user_id=user_id)
         return entries
+    finally:
+        conn.close()
+
+
+@app.get("/search")
+def search_entries(
+    q: str = "",
+    x_vault_session: str | None = Header(None, alias="X-Vault-Session"),
+):
+    """Search entries by title, username, notes, or URL (case-insensitive). Returns list of entries with folder_id and folder_name. Empty q returns []."""
+    key, user_id = _require_session(x_vault_session)
+    conn = vault_db.open_db(config.VAULT_DB_PATH)
+    try:
+        results = vault_db.search_entries(conn, key, user_id, q)
+        audit.log_event("search", resource_id=None, user_id=user_id)
+        return results
     finally:
         conn.close()
 
@@ -231,6 +272,39 @@ def delete_entry_route(
             raise HTTPException(status_code=404, detail="Entry not found")
         audit.log_event("delete_entry", resource_id=entry_id, user_id=user_id)
         return Response(status_code=204)
+    finally:
+        conn.close()
+
+
+@app.post("/recovery/setup", response_model=RecoverySetupResponse)
+def post_recovery_setup(
+    x_vault_session: str | None = Header(None, alias="X-Vault-Session"),
+):
+    """Generate and store recovery key. User must be unlocked. Returns recovery_key once; user must store it offline. Audit: recovery_setup."""
+    key, user_id = _require_session(x_vault_session)
+    conn = vault_db.open_db(config.VAULT_DB_PATH)
+    try:
+        recovery_key = secrets.token_hex(32)
+        recovery_salt = random_bytes(ARGON2_SALT_LEN)
+        recovery_derived = derive_key(recovery_key.encode("utf-8"), recovery_salt)
+        wrapped = encrypt(recovery_derived, key)
+        vault_db.set_recovery(conn, recovery_salt, wrapped)
+        audit.log_event("recovery_setup", resource_id=None, user_id=user_id)
+        return RecoverySetupResponse(recovery_key=recovery_key)
+    finally:
+        conn.close()
+
+
+@app.get("/recovery/status", response_model=RecoveryStatusResponse)
+def get_recovery_status(
+    x_vault_session: str | None = Header(None, alias="X-Vault-Session"),
+):
+    """Return whether recovery key is configured (for current vault)."""
+    _require_session(x_vault_session)
+    conn = vault_db.open_db(config.VAULT_DB_PATH)
+    try:
+        configured = vault_db.get_recovery_configured(conn)
+        return RecoveryStatusResponse(configured=configured)
     finally:
         conn.close()
 

@@ -15,9 +15,12 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from cryptography.exceptions import InvalidTag
+
 from vault.crypto import (
     ARGON2_SALT_LEN,
     decrypt,
+    derive_key,
     encrypt,
     random_bytes,
 )
@@ -100,6 +103,60 @@ def init_salt(conn: sqlite3.Connection) -> bytes:
     )
     conn.commit()
     return salt
+
+
+# --- Recovery key (unlock when master password is forgotten) ---
+
+
+def get_recovery_configured(conn: sqlite3.Connection) -> bool:
+    """True if recovery key has been set (recovery_salt and wrapped_master_key are not null)."""
+    row = conn.execute(
+        "SELECT recovery_salt, wrapped_master_key FROM vault_meta WHERE id = 1"
+    ).fetchone()
+    if not row or row[0] is None or row[1] is None:
+        return False
+    return True
+
+
+def set_recovery(
+    conn: sqlite3.Connection,
+    recovery_salt: bytes,
+    wrapped_master_key: bytes,
+) -> None:
+    """Store recovery salt and wrapped master key. Call when user sets up recovery (must be unlocked)."""
+    conn.execute(
+        "UPDATE vault_meta SET recovery_salt = ?, wrapped_master_key = ? WHERE id = 1",
+        (recovery_salt, wrapped_master_key),
+    )
+    conn.commit()
+
+
+def get_recovery_material(conn: sqlite3.Connection) -> tuple[bytes | None, bytes | None]:
+    """Return (recovery_salt, wrapped_master_key) or (None, None) if not configured."""
+    row = conn.execute(
+        "SELECT recovery_salt, wrapped_master_key FROM vault_meta WHERE id = 1"
+    ).fetchone()
+    if not row or row[0] is None or row[1] is None:
+        return (None, None)
+    return (bytes(row[0]), bytes(row[1]))
+
+
+def unlock_with_recovery_key(
+    conn: sqlite3.Connection, recovery_key_bytes: bytes
+) -> bytes | None:
+    """
+    Derive key from recovery key and unwrap master key. Returns master_key or None if
+    recovery not configured or recovery key is wrong (decrypt fails).
+    """
+    recovery_salt, wrapped = get_recovery_material(conn)
+    if recovery_salt is None or wrapped is None:
+        return None
+    try:
+        recovery_derived = derive_key(recovery_key_bytes, recovery_salt)
+        master_key = decrypt(recovery_derived, wrapped)
+        return master_key
+    except InvalidTag:
+        return None
 
 
 def create_user(conn: sqlite3.Connection) -> int:
@@ -295,3 +352,28 @@ def delete_entry(conn: sqlite3.Connection, entry_id: int, user_id: int) -> bool:
     )
     conn.commit()
     return cur.rowcount == 1
+
+
+def search_entries(
+    conn: sqlite3.Connection, key: bytes, user_id: int, q: str
+) -> list[dict[str, Any]]:
+    """Search entries in user's folders. q is matched (case-insensitive) against title, username, notes, url. Returns list of entries with folder_id and folder_name added. Empty q returns []."""
+    q_clean = q.strip().lower()
+    if not q_clean:
+        return []
+    folders = get_folders(conn, key, user_id)
+    results: list[dict[str, Any]] = []
+    for folder in folders:
+        entries = get_entries(conn, key, folder["id"])
+        for entry in entries:
+            if (
+                q_clean in (entry.get("title") or "").lower()
+                or q_clean in (entry.get("username") or "").lower()
+                or q_clean in (entry.get("notes") or "").lower()
+                or q_clean in (entry.get("url") or "").lower()
+            ):
+                out = dict(entry)
+                out["folder_id"] = folder["id"]
+                out["folder_name"] = folder["name"]
+                results.append(out)
+    return results

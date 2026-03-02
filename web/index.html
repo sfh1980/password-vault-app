@@ -24,6 +24,10 @@
     #add-entry-form input, #add-entry-form textarea { width: 100%; }
     #add-folder-form { margin: 0.5rem 0; }
     #add-folder-form input { margin-right: 0.5rem; }
+    #search-box { margin-bottom: 0.5rem; }
+    #search-box input { margin-right: 0.5rem; min-width: 12rem; }
+    #search-results { margin: 0.5rem 0; }
+    #search-results-list li { cursor: pointer; }
   </style>
 </head>
 <body>
@@ -31,11 +35,20 @@
     <h1>Vault</h1>
     <p id="login-message" class="message hidden"></p>
     <p id="login-error" class="error hidden"></p>
-    <form id="login-form">
-      <label for="password">Master password</label>
-      <input type="password" id="password" name="password" required autocomplete="current-password">
-      <button type="submit">Unlock</button>
-    </form>
+    <div id="unlock-password-area">
+      <form id="login-form">
+        <label for="password">Master password</label>
+        <input type="password" id="password" name="password" autocomplete="current-password">
+        <button type="submit">Unlock</button>
+      </form>
+      <p style="margin-top: 0.75rem;"><button type="button" id="show-recovery-unlock">Unlock with recovery key</button></p>
+    </div>
+    <div id="unlock-recovery-area" class="hidden">
+      <label for="recovery-key-input">Recovery key</label>
+      <textarea id="recovery-key-input" rows="4" placeholder="Paste your recovery key (shown once when you set it up)" aria-label="Recovery key"></textarea>
+      <button type="button" id="unlock-with-recovery-btn">Unlock</button>
+      <button type="button" id="back-to-password-btn">Back to password</button>
+    </div>
   </div>
 
   <div id="vault-screen" class="hidden">
@@ -43,8 +56,27 @@
     <p id="session-message" class="message hidden"></p>
     <p id="vault-error" class="error hidden"></p>
     <button type="button" id="lock-btn">Lock</button>
+    <div id="recovery-area" style="margin: 0.5rem 0;">
+      <button type="button" id="setup-recovery-btn" class="hidden">Set up recovery key</button>
+      <p id="recovery-configured-msg" class="message hidden">Recovery key is set.</p>
+    </div>
+    <div id="recovery-setup-result" class="hidden" style="margin: 0.5rem 0; padding: 0.5rem; background: #fff3cd; border: 1px solid #ffc107;">
+      <p><strong>Save this recovery key offline. You will not see it again.</strong> If you forget your master password, you can unlock the vault with this key.</p>
+      <pre id="recovery-key-display" style="word-break: break-all; margin: 0.5rem 0;"></pre>
+      <button type="button" id="copy-recovery-key-btn">Copy</button>
+      <button type="button" id="recovery-saved-btn">I've saved it</button>
+    </div>
 
     <div id="vault-activity">
+      <div id="search-box">
+        <label for="search-input">Search</label>
+        <input type="text" id="search-input" placeholder="Title, username, URL, notes..." aria-label="Search entries">
+        <button type="button" id="search-btn">Search</button>
+      </div>
+      <div id="search-results" class="hidden">
+        <h2 id="search-results-heading">Search results</h2>
+        <ul id="search-results-list"></ul>
+      </div>
       <h2>Folders</h2>
       <button type="button" id="add-folder-btn">Create folder</button>
       <div id="add-folder-form" class="hidden">

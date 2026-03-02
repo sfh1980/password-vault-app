@@ -11,8 +11,12 @@ This guide gives **plain-language, step-by-step instructions** for running and u
 - **Entries** — Each entry is one saved login: a title, username, password, optional website URL, and optional notes. You can view them and copy the password. The app clears the password from your clipboard 30 seconds after you copy it.
 - **Add entry** — You can create a new saved login: type in the details and click Save. There is a **Generate** button that creates a random password for you.
 - **Audit log** — The app writes a log file of actions (like "user unlocked" or "user created an entry") for your records. Passwords are never written to this log.
+- **Recovery key** — You can set up a one-time recovery key. If you forget your master password, you can unlock the vault by pasting the recovery key instead. The key is shown only once when you set it up; you must save it somewhere safe offline.
+- **Create folder** — You can create new folders from the web page.
+- **Edit and delete entry** — You can edit or delete a saved login from its detail view.
+- **Search** — You can search entries by title, username, URL, or notes.
 
-*Not yet: recovery key, creating a new folder from the web page, editing or deleting an entry or folder, search, file attachments, or separate logins for different people.*
+*Not yet: file attachments, or separate logins for different people.*
 
 ---
 
@@ -104,6 +108,14 @@ Do this **only once**, when you have never run the vault before and do **not** y
    - An **Add entry** button
    This is your **vault view**—you are now logged in.
 6. **If the password is wrong:** You will stay on the same page and may see an error message. Check that you typed the correct master password and try again. If you never ran the first-time setup, do that first (see the section above).
+7. **Unlock with recovery key (if you forgot your password):** If you have already set up a recovery key (see below), you can click **"Unlock with recovery key"** on the login page. A large text box will appear. Paste the recovery key you saved when you set it up, then click **Unlock**. If the key is correct, you will be logged in. You can click **"Back to password"** to return to the normal password box.
+
+---
+
+## Recovery key: set up and use
+
+- **Set up (one time):** After you have unlocked the vault with your master password, look for the **"Set up recovery key"** button near the top (below the Lock button). Click it. The app will show you a long recovery key **once**. Copy it (use the **Copy** button) and store it somewhere safe offline—for example, write it on paper and keep it in a safe place, or save it in a secure file that is not on this computer. Then click **"I've saved it"**. The key will disappear from the screen. You will not see it again. If you forget your master password later, you can use this recovery key to unlock the vault (see step 7 under "Unlock" above).
+- **Already set:** If you have already set up a recovery key, the button will not appear; instead you will see **"Recovery key is set."**
 
 ---
 
@@ -175,4 +187,4 @@ You can type that as one long line in the terminal (after activating the virtual
 
 For a **line-by-line and block-by-block explanation** of the code (what each part does, where it connects, and which standards and algorithms we use), see **[EDUCATIONAL_CODE_WALKTHROUGH.md](EDUCATIONAL_CODE_WALKTHROUGH.md)**. That document is updated whenever we add or change code.
 
-*Last updated: after Phase 4 (web UI, session timeout, clipboard clear). New sections are added below when we add recovery key, create folder, edit/delete, search, or other features.*
+*Last updated: after adding recovery key, create folder, edit/delete entry, and search.*

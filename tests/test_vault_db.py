@@ -15,7 +15,7 @@ _test_dir = tempfile.mkdtemp(prefix="vault_db_test_")
 os.environ["VAULT_DB_PATH"] = os.path.join(_test_dir, "vault.db")
 
 from vault import vault_db
-from vault.crypto import derive_key
+from vault.crypto import derive_key, encrypt, random_bytes
 
 # Use a fixed password for key derivation in tests; salt comes from inited DB.
 TEST_PASSWORD = b"test-db-password"
@@ -121,3 +121,58 @@ def test_delete_entry_removes_and_get_entry_returns_none(inited_conn):
     assert ok is True
     assert vault_db.get_entry(conn, key, entry_id, user_id) is None
     assert len(vault_db.get_entries(conn, key, folder_id)) == 0
+
+
+def test_search_entries_returns_matches_with_folder_name(inited_conn):
+    """search_entries returns entries matching q in title/username/notes/url; includes folder_name."""
+    conn, key, user_id = inited_conn
+    folder_id = vault_db.create_folder(conn, key, user_id, "MyFolder")
+    vault_db.create_entry(
+        conn, key, folder_id,
+        title="Work Login",
+        username="alice",
+        password="p",
+        notes="work stuff",
+        url="https://work.com",
+    )
+    results = vault_db.search_entries(conn, key, user_id, "Work")
+    assert len(results) == 1
+    assert results[0]["title"] == "Work Login"
+    assert results[0]["folder_name"] == "MyFolder"
+    assert results[0]["folder_id"] == folder_id
+    assert vault_db.search_entries(conn, key, user_id, "alice")[0]["username"] == "alice"
+    assert vault_db.search_entries(conn, key, user_id, "") == []
+
+
+def test_recovery_configured_false_until_set_recovery(inited_conn):
+    """get_recovery_configured is False until set_recovery is called."""
+    conn, key, user_id = inited_conn
+    assert vault_db.get_recovery_configured(conn) is False
+    recovery_salt = random_bytes(16)
+    recovery_derived = derive_key(b"my-recovery-key", recovery_salt)
+    wrapped = encrypt(recovery_derived, key)
+    vault_db.set_recovery(conn, recovery_salt, wrapped)
+    assert vault_db.get_recovery_configured(conn) is True
+
+
+def test_unlock_with_recovery_key_returns_master_key(inited_conn):
+    """After set_recovery, unlock_with_recovery_key returns the same master key."""
+    conn, key, user_id = inited_conn
+    recovery_key_bytes = b"test-recovery-key-123"
+    recovery_salt = random_bytes(16)
+    recovery_derived = derive_key(recovery_key_bytes, recovery_salt)
+    wrapped = encrypt(recovery_derived, key)
+    vault_db.set_recovery(conn, recovery_salt, wrapped)
+    unwrapped = vault_db.unlock_with_recovery_key(conn, recovery_key_bytes)
+    assert unwrapped is not None
+    assert unwrapped == key
+
+
+def test_unlock_with_recovery_key_wrong_key_returns_none(inited_conn):
+    """unlock_with_recovery_key with wrong key returns None."""
+    conn, key, user_id = inited_conn
+    recovery_salt = random_bytes(16)
+    recovery_derived = derive_key(b"correct-key", recovery_salt)
+    wrapped = encrypt(recovery_derived, key)
+    vault_db.set_recovery(conn, recovery_salt, wrapped)
+    assert vault_db.unlock_with_recovery_key(conn, b"wrong-key") is None
